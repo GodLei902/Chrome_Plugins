@@ -80,12 +80,13 @@ form.addEventListener('submit', async (event) => {
 
   try {
     const settings = collectSettings();
-    if (!/^https:\/\/(www\.)?instagram\.com\/(p|reel)\/[^/?#]+\/?(?:[?#].*)?$/i.test(settings.targetPostUrl)) throw new Error('请输入 Instagram 帖子或 Reels 的完整 URL。');
+    const normalizedTargetUrl = InstagramCommentRules.normalizeTargetUrl(settings.targetPostUrl);
+    if (!normalizedTargetUrl) throw new Error('请输入 Instagram 帖子或 Reels 的完整 URL。');
+    settings.targetPostUrl = normalizedTargetUrl;
     if (settings.deleteDelayMin > settings.deleteDelayMax || settings.cooldownMin > settings.cooldownMax || settings.refreshMin > settings.refreshMax) throw new Error('每组最小值不能大于最大值。');
     await saveSettings(settings);
     setStatus('Saved');
   } catch (error) {
-    console.error(error);
     setStatus(error.message || '保存失败');
   }
 });
