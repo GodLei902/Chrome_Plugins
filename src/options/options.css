@@ -9,11 +9,13 @@
 
 body {
   margin: 0;
+  min-width: 420px;
   background: #f7f8fa;
   color: #1f2937;
 }
 
 .page {
+  width: 100%;
   max-width: 720px;
   margin: 0 auto;
   padding: 24px;
@@ -23,6 +25,10 @@ body {
   display: flex;
   align-items: center;
   gap: 12px;
+}
+
+.brand > div {
+  min-width: 0;
 }
 
 .brand-icon {
