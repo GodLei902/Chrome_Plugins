@@ -54,6 +54,12 @@ body {
   background: #fff;
 }
 
+.toggles { display: grid; gap: 8px; }
+.advanced { border: 1px solid #d1d5db; border-radius: 8px; padding: 16px; }
+.grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.grid label { display: grid; gap: 6px; font-size: 14px; }
+.grid input { width: 100%; border: 1px solid #d1d5db; border-radius: 6px; padding: 8px; font: inherit; }
+
 .field textarea {
   resize: vertical;
 }

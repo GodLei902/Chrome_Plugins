@@ -1,55 +1,77 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Social Comment Cleaner</title>
+    <title>Instagram 评论清理</title>
     <link rel="stylesheet" href="./options.css" />
   </head>
   <body>
     <main class="page">
       <header class="header">
-        <h1>Social Comment Cleaner</h1>
-        <p>Configure the platform target post and whitelist rules here.</p>
+        <h1>Instagram 评论清理</h1>
+        <p>仅在已登录的 Instagram 当前页面操作；请先使用测试账号和预览模式确认规则。</p>
       </header>
 
       <form id="settingsForm" class="form">
         <label class="field">
-          <span>Enabled</span>
+          <span>启用功能</span>
           <input id="enabled" type="checkbox" />
         </label>
 
         <label class="field">
-          <span>Platform</span>
-          <select id="platform">
+          <span>平台</span>
+          <select id="platform" disabled>
             <option value="instagram">Instagram</option>
-            <option value="tiktok">TikTok</option>
-            <option value="youtube">YouTube</option>
-            <option value="facebook">Facebook</option>
           </select>
         </label>
 
         <label class="field">
-          <span>Target post URL</span>
+          <span>目标帖子 URL</span>
           <input
             id="targetPostUrl"
             type="url"
-            placeholder="https://..."
+            placeholder="https://www.instagram.com/p/shortcode/"
             autocomplete="off"
           />
         </label>
 
         <label class="field">
-          <span>Whitelist</span>
+          <span>白名单用户名</span>
           <textarea
             id="whitelist"
             rows="8"
-            placeholder="One username or keyword per line"
+            placeholder="每行一个用户名，可带 @"
           ></textarea>
         </label>
 
+        <label class="field">
+          <span>删除关键词</span>
+          <textarea id="deleteKeywords" rows="8" placeholder="每行一个普通文本关键词；留空时只预览，不删除"></textarea>
+        </label>
+
+        <div class="toggles">
+          <label><input id="previewMode" type="checkbox" checked /> 预览模式（不打开删除菜单）</label>
+          <label><input id="autoRefresh" type="checkbox" checked /> 自动刷新后继续扫描</label>
+        </div>
+
+        <fieldset class="advanced">
+          <legend>高级频率设置</legend>
+          <div class="grid">
+            <label>最小删除间隔（秒）<input id="deleteDelayMin" type="number" min="1" /></label>
+            <label>最大删除间隔（秒）<input id="deleteDelayMax" type="number" min="1" /></label>
+            <label>每轮最大删除数<input id="batchLimit" type="number" min="1" /></label>
+            <label>最小冷却时间（秒）<input id="cooldownMin" type="number" min="1" /></label>
+            <label>最大冷却时间（秒）<input id="cooldownMax" type="number" min="1" /></label>
+            <label>最小刷新间隔（秒）<input id="refreshMin" type="number" min="1" /></label>
+            <label>最大刷新间隔（秒）<input id="refreshMax" type="number" min="1" /></label>
+            <label>会话最大删除数<input id="sessionLimit" type="number" min="1" /></label>
+            <label>会话最长时间（分钟）<input id="sessionMaxMinutes" type="number" min="1" /></label>
+          </div>
+        </fieldset>
+
         <div class="actions">
-          <button type="submit">Save</button>
+          <button type="submit">保存</button>
           <span id="status" class="status" aria-live="polite"></span>
         </div>
       </form>

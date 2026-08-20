@@ -2,16 +2,11 @@
   "manifest_version": 3,
   "name": "Social Comment Cleaner",
   "version": "0.1.0",
-  "description": "A Chrome extension scaffold for managing social platform comments on a specific post.",
+  "description": "Safely clean keyword-matched comments from one configured Instagram post.",
   "permissions": ["storage"],
   "host_permissions": [
     "https://www.instagram.com/*",
-    "https://instagram.com/*",
-    "https://www.tiktok.com/*",
-    "https://www.youtube.com/*",
-    "https://m.youtube.com/*",
-    "https://www.facebook.com/*",
-    "https://facebook.com/*"
+    "https://instagram.com/*"
   ],
   "background": {
     "service_worker": "src/background/service-worker.js"
@@ -24,14 +19,9 @@
     {
       "matches": [
         "https://www.instagram.com/*",
-        "https://instagram.com/*",
-        "https://www.tiktok.com/*",
-        "https://www.youtube.com/*",
-        "https://m.youtube.com/*",
-        "https://www.facebook.com/*",
-        "https://facebook.com/*"
+        "https://instagram.com/*"
       ],
-      "js": ["src/content/social-comment-cleaner.js"],
+      "js": ["src/content/rules.js", "src/content/social-comment-cleaner.js"],
       "run_at": "document_idle"
     }
   ]
