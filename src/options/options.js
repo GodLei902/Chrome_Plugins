@@ -4,7 +4,7 @@ const DEFAULT_SETTINGS = {
   platform: 'instagram',
   targetPostUrl: '',
   whitelist: '',
-  deleteKeywords: '', previewMode: true,
+  deleteKeywords: '',
   deleteDelayMin: 12, deleteDelayMax: 25, batchLimit: 3,
   cooldownMin: 120, cooldownMax: 300,
   sessionLimit: 30, sessionMaxMinutes: 120,
@@ -25,7 +25,6 @@ function normalizeSettings(raw) {
     targetPostUrl: typeof raw?.targetPostUrl === 'string' ? raw.targetPostUrl.trim() : '',
     whitelist: typeof raw?.whitelist === 'string' ? raw.whitelist.trim() : '',
     deleteKeywords: typeof raw?.deleteKeywords === 'string' ? raw.deleteKeywords.trim() : '',
-    previewMode: raw?.previewMode !== false,
   };
   for (const key of ['deleteDelayMin', 'deleteDelayMax', 'batchLimit', 'cooldownMin', 'cooldownMax', 'sessionLimit', 'sessionMaxMinutes']) {
     result[key] = Number(raw?.[key]) > 0 ? Number(raw[key]) : DEFAULT_SETTINGS[key];
@@ -47,7 +46,6 @@ function renderSettings(settings) {
   targetPostUrlInput.value = settings.targetPostUrl;
   whitelistInput.value = settings.whitelist;
   deleteKeywordsInput.value = settings.deleteKeywords;
-  document.getElementById('previewMode').checked = settings.previewMode;
   for (const key of ['deleteDelayMin', 'deleteDelayMax', 'batchLimit', 'cooldownMin', 'cooldownMax', 'sessionLimit', 'sessionMaxMinutes']) document.getElementById(key).value = settings[key];
 }
 
@@ -57,8 +55,7 @@ function collectSettings() {
     targetPostUrl: targetPostUrlInput.value,
     whitelist: whitelistInput.value,
     deleteKeywords: deleteKeywordsInput.value,
-    previewMode: document.getElementById('previewMode').checked,
-    ...Object.fromEntries(['deleteDelayMin', 'deleteDelayMax', 'batchLimit', 'cooldownMin', 'sessionLimit', 'sessionMaxMinutes'].map((key) => [key, document.getElementById(key).value])),
+    ...Object.fromEntries(['deleteDelayMin', 'deleteDelayMax', 'batchLimit', 'cooldownMin', 'cooldownMax', 'sessionLimit', 'sessionMaxMinutes'].map((key) => [key, document.getElementById(key).value])),
   });
 }
 
@@ -93,8 +90,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   settingInputs.forEach((input) => input.addEventListener('change', scheduleAutoSave));
 });
 
-form.addEventListener('submit', async (event) => {
-  event.preventDefault();
+async function launch(mode) {
   setStatus('准备开始...');
 
   try {
@@ -107,10 +103,17 @@ form.addEventListener('submit', async (event) => {
     const tabs = await chrome.tabs.query({ lastFocusedWindow: true });
     const tab = tabs.find((item) => InstagramCommentRules.normalizeTargetUrl(item.url || '') === normalizedTargetUrl);
     if (!tab?.id) throw new Error('请先打开与目标 URL 完全匹配的 Instagram 帖子页面。');
-    const response = await chrome.tabs.sendMessage(tab.id, { type: 'ICC_START' }).catch(() => null);
+    const response = await chrome.tabs.sendMessage(tab.id, { type: mode === 'preview' ? 'ICC_PREVIEW' : 'ICC_START' }).catch(() => null);
     if (!response?.ok) throw new Error(response?.reason || '当前页面尚未加载清理器，请刷新 Instagram 页面后重试。');
-    setStatus('已开始');
+    setStatus(mode === 'preview' ? '预览已开始' : '已开始');
   } catch (error) {
     setStatus(error.message || '启动失败');
   }
+}
+
+form.addEventListener('submit', (event) => {
+  event.preventDefault();
+  launch('run');
 });
+
+document.getElementById('previewButton').addEventListener('click', () => launch('preview'));

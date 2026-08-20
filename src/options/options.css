@@ -95,13 +95,24 @@ body {
   border: 0;
   border-radius: 8px;
   padding: 10px 16px;
+  min-width: 108px;
+  min-height: 48px;
+  flex: 0 0 auto;
+  white-space: nowrap;
   background: #1d4ed8;
   color: #fff;
   font: inherit;
   cursor: pointer;
 }
 
+.actions button.preview {
+  min-width: 150px;
+  background: #0f766e;
+}
+
 .status {
   min-height: 1.2em;
-  color: #059669;
+  min-width: 0;
+  flex: 1 1 auto;
+  color: #b42318;
 }

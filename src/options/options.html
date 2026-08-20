@@ -51,10 +51,6 @@
           <textarea id="deleteKeywords" rows="8" placeholder="每行一个普通文本关键词；留空时只预览，不删除"></textarea>
         </label>
 
-        <div class="toggles">
-          <label><input id="previewMode" type="checkbox" checked /> 预览模式（不打开删除菜单）</label>
-        </div>
-
         <fieldset class="advanced">
           <legend>高级频率设置</legend>
           <div class="grid">
@@ -70,6 +66,7 @@
 
         <div class="actions">
           <button type="submit">开始</button>
+          <button type="button" id="previewButton" class="preview">预览模式</button>
           <span id="status" class="status" aria-live="polite"></span>
         </div>
       </form>
