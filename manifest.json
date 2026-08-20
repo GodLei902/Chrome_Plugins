@@ -1,8 +1,14 @@
 {
   "manifest_version": 3,
-  "name": "Social Comment Cleaner",
+  "name": "社交评论清理器",
   "version": "0.1.0",
   "description": "Safely clean keyword-matched comments from one configured Instagram post.",
+  "icons": {
+    "16": "assets/icons/icon-16.png",
+    "32": "assets/icons/icon-32.png",
+    "48": "assets/icons/icon-48.png",
+    "128": "assets/icons/icon-128.png"
+  },
   "permissions": ["storage"],
   "host_permissions": [
     "https://www.instagram.com/*",
@@ -13,7 +19,13 @@
   },
   "options_page": "src/options/options.html",
   "action": {
-    "default_title": "Social Comment Cleaner"
+    "default_title": "社交评论清理器",
+    "default_icon": {
+      "16": "assets/icons/icon-16.png",
+      "32": "assets/icons/icon-32.png",
+      "48": "assets/icons/icon-48.png",
+      "128": "assets/icons/icon-128.png"
+    }
   },
   "content_scripts": [
     {

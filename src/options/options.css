@@ -19,9 +19,24 @@ body {
   padding: 24px;
 }
 
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.brand-icon {
+  flex: 0 0 auto;
+}
+
 .header h1 {
   margin: 0 0 8px;
   font-size: 24px;
+}
+
+.version {
+  color: #6b7280;
+  font-size: 14px;
 }
 
 .header p {

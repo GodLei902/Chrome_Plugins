@@ -3,7 +3,7 @@ const LOCK_PREFIX = 'instagramCommentCleanerLock:';
 const LEASE_MS = 90 * 1000;
 
 chrome.runtime.onInstalled.addListener(() => {
-  console.info('[Social Comment Cleaner] installed');
+  console.info('[社交评论清理器] installed');
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {

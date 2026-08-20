@@ -1,28 +1,124 @@
-# Social Comment Cleaner
+# 社交评论清理器使用手册
 
-Chrome MV3 extension for conservatively cleaning keyword-matched comments from one Instagram post or Reels URL.
+## 一、插件简介
 
-## Goals
+社交评论清理器是一个 Chrome 扩展，用于清理指定 Instagram 帖子或 Reels 下命中关键词的评论和回复。
 
-- Target exactly one configured Instagram `/p/<shortcode>/` or `/reel/<shortcode>/` page
-- Preserve whitelist users, including whitelist replies that protect their parent comment
-- Match ordinary text keywords case-insensitively; an empty list never deletes
-- Use preview and an explicit per-round confirmation before real deletion
-- Serialize deletion, enforce delays/limits, and pause when reliable controls cannot be found
+扩展只操作当前浏览器中已经登录的 Instagram 页面，不读取、不保存或上传账号密码，也不调用 Instagram 私有 API。页面结构、账号权限或网络状态异常时，扩展会暂停，不会猜测点击其他操作。
 
-## Layout
+## 二、如何安装
 
-- `manifest.json` - Chrome extension entry manifest
-- `src/background` - service worker and extension-level coordination
-- `src/content/rules.js` - independently usable URL, whitelist, keyword and candidate rules
-- `src/content/social-comment-cleaner.js` - Instagram page adapter, UI panel and run state
-- `src/options` - extension settings UI
-- `assets/icons` - extension icons and visual assets
+1. 使用 Chrome 打开 `chrome://extensions`。
+2. 打开右上角的“开发者模式”。
+3. 点击“加载已解压的扩展程序”。
+4. 选择本项目根目录，也就是包含 `manifest.json` 的目录。
+5. 确认扩展列表中出现 **社交评论清理器**，版本号为 `0.1.0`。
 
-## Use
+安装完成后，可以点击 Chrome 工具栏上的拼图图标，将社交评论清理器固定到工具栏。
 
-1. In Chrome, load this folder as an unpacked extension from `chrome://extensions`.
-2. Open **Extension options**, enable the extension, supply the exact post URL, whitelist and keywords, then save.
-3. Visit that same post while logged in. Start with preview mode, inspect the candidate count, then disable preview mode only after verifying it.
+## 三、如何打开设置页
 
-The extension uses the existing Instagram session only; it does not collect credentials or call private APIs. Instagram UI can change, so ambiguous menus, missing confirmation buttons, permissions issues, challenges, and rate-limit messages pause the session rather than clicking a guess.
+在 `chrome://extensions` 中找到社交评论清理器，点击“详细信息”，再点击“扩展程序选项”。也可以右键工具栏中的扩展图标，选择“选项”。
+
+## 四、首次配置
+
+### 基本设置
+
+- **启用功能**：打开后，扩展才会在 Instagram 页面注入控制面板。
+- **平台**：当前仅支持 Instagram。
+- **目标帖子 URL**：填写要处理的单个帖子或 Reels 的完整地址，例如：
+  - `https://www.instagram.com/p/短代码/`
+  - `https://www.instagram.com/reel/短代码/`
+- **白名单用户名**：每行一个用户名，可以带或不带 `@`。用户名比较不区分大小写。
+- **删除关键词**：每行一个普通文本关键词。评论文本包含任意关键词时，会成为候选项；匹配不区分大小写。
+
+目标地址必须是 Instagram 的 `/p/` 或 `/reel/` 地址。查询参数、哈希和末尾斜杠会自动规范化，但帖子类型和短代码必须正确。
+
+### 运行设置
+
+- **预览模式**：默认开启。只扫描并统计候选评论，不打开删除菜单。首次运行必须先使用预览模式确认结果。
+- **自动刷新后继续扫描**：每轮处理和冷却后刷新页面，并在目标地址仍匹配时恢复会话。
+
+填写完成后点击“保存”。如果 URL 不完整，或任意一组最小值大于最大值，页面会提示错误且不会保存。
+
+## 五、推荐使用流程
+
+### 1. 先准备测试内容
+
+建议使用测试账号、测试帖子或临时评论验证规则。确认当前 Chrome 已登录有权管理目标评论的 Instagram 账号。
+
+### 2. 使用预览模式
+
+1. 在设置页打开“启用功能”。
+2. 填写目标帖子 URL、白名单和关键词。
+3. 保持“预览模式”开启并保存。
+4. 打开完全匹配的目标帖子页面。
+5. 等待 Instagram 页面加载完成，在右下角找到“社交评论清理器”面板。
+6. 点击“开始扫描”。
+
+面板会显示当前状态，以及“扫描、删除、跳过”统计。预览模式不会执行删除；白名单评论、带白名单回复的一级评论和未命中关键词的评论会被跳过。
+
+### 3. 执行正式删除
+
+确认预览结果无误后：
+
+1. 返回设置页关闭“预览模式”并保存。
+2. 回到目标帖子，点击“开始扫描”。
+3. 扫描完成后，查看面板显示的候选数量。
+4. 点击“确认处理本轮 X 条候选”，才会开始真实删除。
+
+删除按回复优先、一级评论随后执行。每条操作之间会随机等待；达到每轮上限后会进入冷却。处理过程中可以点击“停止”，停止后不会启动下一条删除。
+
+## 六、默认限制与高级参数
+
+高级设置用于控制处理节奏和会话上限，所有数值都必须大于 0。
+
+| 参数 | 默认值 | 说明 |
+| --- | ---: | --- |
+| 最小/最大删除间隔 | 12 / 25 秒 | 两条删除操作之间的随机等待时间 |
+| 每轮最大删除数 | 3 | 一轮扫描最多处理的候选数 |
+| 最小/最大冷却时间 | 120 / 300 秒 | 一轮完成后的随机冷却时间 |
+| 最小/最大刷新间隔 | 180 / 420 秒 | 自动刷新前的随机等待时间 |
+| 会话最大删除数 | 30 | 一个运行会话最多删除的数量 |
+| 会话最长时间 | 120 分钟 | 一个运行会话允许持续的最长时间 |
+
+除非明确了解账号和页面风险，否则不要将间隔调得过短，也不要取消会话上限。
+
+## 七、规则说明
+
+- 未填写删除关键词时，只进行扫描和预览，不会删除任何评论。
+- 白名单优先级最高。白名单用户名的评论永远不会删除。
+- 一级评论下只要存在已加载的白名单回复，该一级评论就会被跳过，以免连带删除白名单回复。
+- 扩展只处理当前页面已加载的评论和回复，不进行无限滚动或跨页面抓取。
+- 删除菜单、删除项或确认按钮无法可靠识别时，扩展会暂停并显示原因。
+- 同一条帖子同时只能在一个标签页中运行。
+
+## 八、常见问题
+
+### 页面没有出现控制面板
+
+检查扩展是否已启用、设置页是否打开“启用功能”、当前页面是否与目标 URL 完全匹配，并刷新页面等待 Instagram 加载完成。
+
+### 扫描结果为 0
+
+确认评论已经加载、关键词没有多余空格，并检查关键词是否确实出现在评论文本中。扩展不会自动加载无限滚动区域之外的评论。
+
+### 点击确认后暂停
+
+常见原因包括账号没有删除权限、Instagram 弹出验证或限流提示、网络异常，或 Instagram 页面结构发生变化。根据面板中的错误信息处理后，再重新打开目标页面尝试；不要在出现验证或限流时连续重试。
+
+### 提示帖子正在另一标签页运行
+
+停止另一标签页的会话，或关闭该标签页后再重新开始。同一条帖子同时只能有一个运行会话。
+
+### 如何取消自动处理
+
+在 Instagram 页面点击“停止”。需要彻底关闭自动恢复时，在设置页关闭“自动刷新后继续扫描”，保存后再停止当前会话。
+
+## 九、安全建议
+
+- 先用测试账号和预览模式确认规则，再处理真实内容。
+- 白名单中加入必须保留的账号，尤其是重要合作方或管理员账号。
+- 不要在出现账号验证、限流或挑战页面时继续操作。
+- 定期检查关键词和目标 URL，避免误配置到其他帖子。
+- 扩展只应从可信的本地源码目录加载；不需要向任何人提供 Instagram 登录信息。

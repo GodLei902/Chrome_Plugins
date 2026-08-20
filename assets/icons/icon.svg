@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Social Comment Cleaner">
+  <defs>
+    <linearGradient id="background" x1="18" y1="10" x2="110" y2="118" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#2563eb"/>
+      <stop offset="1" stop-color="#0f3d99"/>
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" rx="28" fill="url(#background)"/>
+  <path d="M24 38c0-9.94 8.06-18 18-18h44c9.94 0 18 8.06 18 18v29c0 9.94-8.06 18-18 18H57.5L38 100V85.5C29.83 83.7 24 76.43 24 67V38Z" fill="#fff"/>
+  <circle cx="50" cy="53" r="6" fill="#2563eb"/>
+  <circle cx="65" cy="53" r="6" fill="#2563eb"/>
+  <circle cx="80" cy="53" r="6" fill="#2563eb"/>
+  <path d="m77 104 28-28 7 7-28 28-13 3 3-10Z" fill="#fbbf24"/>
+  <path d="m72 109 13 3-3-13-10 10Z" fill="#f59e0b"/>
+  <path d="m100 76 7-7 8 8-7 7-8-8Z" fill="#fde68a"/>
+</svg>
