@@ -106,6 +106,20 @@
     run.stats = resumeStats || { scanned: 0, deleted: 0, skipped: 0 }; run.startedAt = Date.now(); run.stopped = false;
     try { await scan(); if (!run.stopped && run.candidates.length) await process(); else await stop(); } catch (error) { run.state = 'paused'; run.error = error.message; draw(); }
   }
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message?.type !== 'ICC_START') return false;
+    if (!run.stopped) {
+      sendResponse({ ok: false, reason: '当前任务正在运行。' });
+      return false;
+    }
+    start().catch((error) => {
+      run.state = 'error';
+      run.error = error.message;
+      draw();
+    });
+    sendResponse({ ok: true });
+    return false;
+  });
   async function bootstrap() {
     if (!InstagramCommentRules.normalizeTargetUrl(location.href)) return;
     installPanel();

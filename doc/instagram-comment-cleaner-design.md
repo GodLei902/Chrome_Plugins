@@ -83,7 +83,7 @@ Instagram 界面会随语言和版本变化。评论、更多操作、删除菜�
 - Instagram 内容适配器：收集当前可见评论与回复、展开回复、定位操作菜单、发起删除并验证 UI 已更新。
 - 内容脚本运行器：URL 守卫、状态机、Shadow DOM 控制面板、延迟调度、刷新恢复和停止信号。
 - 后台 Service Worker：跨刷新运行快照、单标签执行租约和运行统计协调。
-- 设置页：读取、校验并保存规则、预览模式与频率参数。
+- 设置页：读取并自动保存规则、预览模式与频率参数；点击“开始”时校验配置并启动当前目标帖子的运行会话。
 
 当前脚手架中的 `src/content/social-comment-cleaner.js`、`src/background/service-worker.js` 和 `src/options/` 是上述实现的主要落点。
 

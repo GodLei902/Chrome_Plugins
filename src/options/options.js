@@ -16,6 +16,8 @@ const targetPostUrlInput = document.getElementById('targetPostUrl');
 const whitelistInput = document.getElementById('whitelist');
 const deleteKeywordsInput = document.getElementById('deleteKeywords');
 const statusEl = document.getElementById('status');
+const settingInputs = [...form.querySelectorAll('input, textarea, select')];
+let saveTimer;
 
 function normalizeSettings(raw) {
   const result = {
@@ -64,23 +66,51 @@ function setStatus(message) {
   statusEl.textContent = message;
 }
 
+function normalizeTarget(settings) {
+  const normalizedTargetUrl = InstagramCommentRules.normalizeTargetUrl(settings.targetPostUrl);
+  return normalizedTargetUrl ? { ...settings, targetPostUrl: normalizedTargetUrl } : settings;
+}
+
+async function persistCurrentSettings() {
+  await saveSettings(normalizeTarget(collectSettings()));
+}
+
+function scheduleAutoSave() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(async () => {
+    try {
+      await persistCurrentSettings();
+      setStatus('已自动保存');
+    } catch (error) {
+      setStatus(error.message || '自动保存失败');
+    }
+  }, 350);
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
   renderSettings(await loadSettings());
+  settingInputs.forEach((input) => input.addEventListener('input', scheduleAutoSave));
+  settingInputs.forEach((input) => input.addEventListener('change', scheduleAutoSave));
 });
 
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
-  setStatus('Saving...');
+  setStatus('准备开始...');
 
   try {
-    const settings = collectSettings();
+    const settings = normalizeTarget(collectSettings());
     const normalizedTargetUrl = InstagramCommentRules.normalizeTargetUrl(settings.targetPostUrl);
     if (!normalizedTargetUrl) throw new Error('请输入 Instagram 帖子或 Reels 的完整 URL。');
     settings.targetPostUrl = normalizedTargetUrl;
     if (settings.deleteDelayMin > settings.deleteDelayMax || settings.cooldownMin > settings.cooldownMax) throw new Error('每组最小值不能大于最大值。');
     await saveSettings(settings);
-    setStatus('Saved');
+    const tabs = await chrome.tabs.query({ lastFocusedWindow: true });
+    const tab = tabs.find((item) => InstagramCommentRules.normalizeTargetUrl(item.url || '') === normalizedTargetUrl);
+    if (!tab?.id) throw new Error('请先打开与目标 URL 完全匹配的 Instagram 帖子页面。');
+    const response = await chrome.tabs.sendMessage(tab.id, { type: 'ICC_START' }).catch(() => null);
+    if (!response?.ok) throw new Error(response?.reason || '当前页面尚未加载清理器，请刷新 Instagram 页面后重试。');
+    setStatus('已开始');
   } catch (error) {
-    setStatus(error.message || '保存失败');
+    setStatus(error.message || '启动失败');
   }
 });
