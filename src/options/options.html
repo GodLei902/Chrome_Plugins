@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Social Comment Cleaner</title>
+    <link rel="stylesheet" href="./options.css" />
+  </head>
+  <body>
+    <main class="page">
+      <header class="header">
+        <h1>Social Comment Cleaner</h1>
+        <p>Configure the platform target post and whitelist rules here.</p>
+      </header>
+
+      <form id="settingsForm" class="form">
+        <label class="field">
+          <span>Enabled</span>
+          <input id="enabled" type="checkbox" />
+        </label>
+
+        <label class="field">
+          <span>Platform</span>
+          <select id="platform">
+            <option value="instagram">Instagram</option>
+            <option value="tiktok">TikTok</option>
+            <option value="youtube">YouTube</option>
+            <option value="facebook">Facebook</option>
+          </select>
+        </label>
+
+        <label class="field">
+          <span>Target post URL</span>
+          <input
+            id="targetPostUrl"
+            type="url"
+            placeholder="https://..."
+            autocomplete="off"
+          />
+        </label>
+
+        <label class="field">
+          <span>Whitelist</span>
+          <textarea
+            id="whitelist"
+            rows="8"
+            placeholder="One username or keyword per line"
+          ></textarea>
+        </label>
+
+        <div class="actions">
+          <button type="submit">Save</button>
+          <span id="status" class="status" aria-live="polite"></span>
+        </div>
+      </form>
+    </main>
+
+    <script src="./options.js"></script>
+  </body>
+</html>

@@ -1,0 +1,38 @@
+{
+  "manifest_version": 3,
+  "name": "Social Comment Cleaner",
+  "version": "0.1.0",
+  "description": "A Chrome extension scaffold for managing social platform comments on a specific post.",
+  "permissions": ["storage"],
+  "host_permissions": [
+    "https://www.instagram.com/*",
+    "https://instagram.com/*",
+    "https://www.tiktok.com/*",
+    "https://www.youtube.com/*",
+    "https://m.youtube.com/*",
+    "https://www.facebook.com/*",
+    "https://facebook.com/*"
+  ],
+  "background": {
+    "service_worker": "src/background/service-worker.js"
+  },
+  "options_page": "src/options/options.html",
+  "action": {
+    "default_title": "Social Comment Cleaner"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.instagram.com/*",
+        "https://instagram.com/*",
+        "https://www.tiktok.com/*",
+        "https://www.youtube.com/*",
+        "https://m.youtube.com/*",
+        "https://www.facebook.com/*",
+        "https://facebook.com/*"
+      ],
+      "js": ["src/content/social-comment-cleaner.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
