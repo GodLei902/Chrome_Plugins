@@ -63,6 +63,24 @@ function setStatus(message) {
   statusEl.textContent = message;
 }
 
+function clearValidationState() {
+  targetPostUrlInput.removeAttribute('aria-invalid');
+}
+
+function validateSettings(settings) {
+  clearValidationState();
+  const normalizedTargetUrl = InstagramCommentRules.normalizeTargetUrl(settings.targetPostUrl);
+  if (!normalizedTargetUrl) {
+    targetPostUrlInput.setAttribute('aria-invalid', 'true');
+    targetPostUrlInput.focus();
+    throw new Error('请输入 Instagram 帖子或 Reels 的完整 URL。');
+  }
+  if (settings.deleteDelayMin > settings.deleteDelayMax || settings.cooldownMin > settings.cooldownMax) {
+    throw new Error('每组最小值不能大于最大值。');
+  }
+  return { ...settings, targetPostUrl: normalizedTargetUrl };
+}
+
 function normalizeTarget(settings) {
   const normalizedTargetUrl = InstagramCommentRules.normalizeTargetUrl(settings.targetPostUrl);
   return normalizedTargetUrl ? { ...settings, targetPostUrl: normalizedTargetUrl } : settings;
@@ -77,7 +95,6 @@ function scheduleAutoSave() {
   saveTimer = setTimeout(async () => {
     try {
       await persistCurrentSettings();
-      setStatus('已自动保存');
     } catch (error) {
       setStatus(error.message || '自动保存失败');
     }
@@ -86,7 +103,10 @@ function scheduleAutoSave() {
 
 document.addEventListener('DOMContentLoaded', async () => {
   renderSettings(await loadSettings());
-  settingInputs.forEach((input) => input.addEventListener('input', scheduleAutoSave));
+  settingInputs.forEach((input) => input.addEventListener('input', () => {
+    clearValidationState();
+    scheduleAutoSave();
+  }));
   settingInputs.forEach((input) => input.addEventListener('change', scheduleAutoSave));
 });
 
@@ -94,14 +114,10 @@ async function launch(mode) {
   setStatus('准备开始...');
 
   try {
-    const settings = normalizeTarget(collectSettings());
-    const normalizedTargetUrl = InstagramCommentRules.normalizeTargetUrl(settings.targetPostUrl);
-    if (!normalizedTargetUrl) throw new Error('请输入 Instagram 帖子或 Reels 的完整 URL。');
-    settings.targetPostUrl = normalizedTargetUrl;
-    if (settings.deleteDelayMin > settings.deleteDelayMax || settings.cooldownMin > settings.cooldownMax) throw new Error('每组最小值不能大于最大值。');
+    const settings = validateSettings(collectSettings());
     await saveSettings(settings);
     const tabs = await chrome.tabs.query({ lastFocusedWindow: true });
-    const tab = tabs.find((item) => InstagramCommentRules.normalizeTargetUrl(item.url || '') === normalizedTargetUrl);
+    const tab = tabs.find((item) => InstagramCommentRules.normalizeTargetUrl(item.url || '') === settings.targetPostUrl);
     if (!tab?.id) throw new Error('请先打开与目标 URL 完全匹配的 Instagram 帖子页面。');
     const response = await chrome.tabs.sendMessage(tab.id, { type: mode === 'preview' ? 'ICC_PREVIEW' : 'ICC_START' }).catch(() => null);
     if (!response?.ok) throw new Error(response?.reason || '当前页面尚未加载清理器，请刷新 Instagram 页面后重试。');

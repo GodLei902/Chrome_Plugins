@@ -75,6 +75,13 @@ body {
   background: #fff;
 }
 
+.field input:invalid:not(:placeholder-shown),
+.field input[aria-invalid="true"] {
+  border-color: #dc2626;
+  outline: 2px solid #fecaca;
+  outline-offset: 0;
+}
+
 .toggles { display: grid; gap: 8px; }
 .advanced { border: 1px solid #d1d5db; border-radius: 8px; padding: 16px; }
 .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
@@ -87,7 +94,6 @@ body {
 
 .actions {
   display: flex;
-  align-items: center;
   gap: 12px;
 }
 
@@ -112,7 +118,6 @@ body {
 
 .status {
   min-height: 1.2em;
-  min-width: 0;
-  flex: 1 1 auto;
+  display: block;
   color: #b42318;
 }
