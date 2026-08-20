@@ -16,19 +16,15 @@
     run.ui.querySelector('[data-error]').textContent = run.error || '';
     run.ui.querySelector('[data-start]').disabled = !run.stopped;
     run.ui.querySelector('[data-stop]').disabled = run.stopped;
-    const confirm = run.ui.querySelector('[data-confirm]');
-    confirm.hidden = !run.candidates.length || !run.stopped || run.settings?.previewMode || !run.rules?.keywords.length;
-    confirm.textContent = `确认处理本轮 ${run.candidates.length} 条候选`;
   }
   function installPanel() {
     if (document.getElementById('icc-host')) return;
     const host = document.createElement('div'); host.id = 'icc-host'; host.style.cssText = 'position:fixed;right:16px;bottom:16px;z-index:2147483647';
     const root = host.attachShadow({ mode: 'open' });
-    root.innerHTML = `<style>main{font:13px system-ui;color:#111;background:#fff;border:1px solid #d1d5db;border-radius:10px;box-shadow:0 8px 28px #0003;width:272px;padding:14px}h2{font-size:14px;margin:0 0 10px}p{margin:7px 0;line-height:1.35}.muted{color:#666}.error{color:#b42318;min-height:1.35em}button{border:0;border-radius:6px;padding:7px 10px;margin:8px 6px 0 0;cursor:pointer;background:#2563eb;color:#fff}button[data-stop]{background:#6b7280}button:disabled{opacity:.5}</style><main><h2>社交评论清理器</h2><p>状态：<b data-state>空闲</b></p><p class="muted" data-stats>扫描 0 · 删除 0 · 跳过 0</p><p class="error" data-error></p><button data-start>开始扫描</button><button data-stop>停止</button><button data-confirm hidden></button></main>`;
+    root.innerHTML = `<style>main{font:13px system-ui;color:#111;background:#fff;border:1px solid #d1d5db;border-radius:10px;box-shadow:0 8px 28px #0003;width:272px;padding:14px}h2{font-size:14px;margin:0 0 10px}p{margin:7px 0;line-height:1.35}.muted{color:#666}.error{color:#b42318;min-height:1.35em}button{border:0;border-radius:6px;padding:7px 10px;margin:8px 6px 0 0;cursor:pointer;background:#2563eb;color:#fff}button[data-stop]{background:#6b7280}button:disabled{opacity:.5}</style><main><h2>社交评论清理器</h2><p>状态：<b data-state>空闲</b></p><p class="muted" data-stats>扫描 0 · 删除 0 · 跳过 0</p><p class="error" data-error></p><button data-start>开始</button><button data-stop>停止</button></main>`;
     run.ui = root; document.documentElement.append(host);
     root.querySelector('[data-start]').addEventListener('click', start);
     root.querySelector('[data-stop]').addEventListener('click', () => stop());
-    root.querySelector('[data-confirm]').addEventListener('click', process);
   }
   function username(article) {
     const link = [...article.querySelectorAll('a[href^="/"]')].find((a) => /^\/[\w.]+\/?$/.test(a.getAttribute('href')) && label(a));
@@ -83,38 +79,38 @@
   }
   async function process() {
     run.stopped = false; run.state = 'running'; draw();
-    if (run.settings.previewMode || !run.rules.keywords.length) { run.stopped = true; run.state = 'idle'; draw(); return; }
+    if (run.settings.previewMode || !run.rules.keywords.length) { await stop(); return; }
     try {
-      for (const candidate of run.candidates.slice(0, run.settings.batchLimit)) {
+      while (run.candidates.length) {
+        for (const candidate of run.candidates.slice(0, run.settings.batchLimit)) {
+          if (run.stopped) return;
+          if (run.stats.deleted >= run.settings.sessionLimit) throw new Error('已达到本次会话删除上限。');
+          if (Date.now() - run.startedAt > run.settings.sessionMaxMinutes * 60000) throw new Error('已达到本次会话运行时长上限。');
+          if (await remove(candidate)) run.stats.deleted++;
+          await persist(); if (!run.stopped) await delay(random(run.settings.deleteDelayMin, run.settings.deleteDelayMax));
+        }
         if (run.stopped) return;
-        if (run.stats.deleted >= run.settings.sessionLimit) throw new Error('已达到本次会话删除上限。');
-        if (Date.now() - run.startedAt > run.settings.sessionMaxMinutes * 60000) throw new Error('已达到本次会话运行时长上限。');
-        if (await remove(candidate)) run.stats.deleted++;
-        await persist(); if (!run.stopped) await delay(random(run.settings.deleteDelayMin, run.settings.deleteDelayMax));
+        run.state = 'cooling-down'; draw(); await delay(random(run.settings.cooldownMin, run.settings.cooldownMax));
+        if (run.stopped) return;
+        run.candidates = [];
+        await scan();
       }
-      if (run.stopped) return;
-      run.state = 'cooling-down'; draw(); await delay(random(run.settings.cooldownMin, run.settings.cooldownMax));
-      if (run.stopped) return;
-      if (run.settings.autoRefresh) { await persist(); await delay(random(run.settings.refreshMin, run.settings.refreshMax)); if (!run.stopped) location.reload(); return; }
-      run.candidates = []; await scan();
+      await stop();
     } catch (error) { run.stopped = true; run.state = 'paused'; run.error = error.message; draw(); await persist(); }
   }
   async function start(resumeStats = null) {
     run.settings = (await chrome.storage.sync.get(SETTINGS_KEY))[SETTINGS_KEY]; run.rules = InstagramCommentRules.prepareRules(run.settings || {});
-    if (!run.settings?.enabled) { run.error = '请先在设置页启用功能。'; draw(); return; }
     if (InstagramCommentRules.normalizeTargetUrl(location.href) !== run.rules.targetUrl) { run.error = '当前 URL 与设置的目标帖子不匹配。'; draw(); return; }
     const locked = await send({ type: 'ICC_ACQUIRE_LOCK', targetUrl: run.rules.targetUrl });
     if (!locked.ok) { run.error = locked.reason; draw(); return; }
-    run.stats = resumeStats || { scanned: 0, deleted: 0, skipped: 0 }; run.startedAt = Date.now(); run.stopped = true;
-    try { await scan(); } catch (error) { run.state = 'paused'; run.error = error.message; draw(); }
+    run.stats = resumeStats || { scanned: 0, deleted: 0, skipped: 0 }; run.startedAt = Date.now(); run.stopped = false;
+    try { await scan(); if (!run.stopped && run.candidates.length) await process(); else await stop(); } catch (error) { run.state = 'paused'; run.error = error.message; draw(); }
   }
   async function bootstrap() {
     if (!InstagramCommentRules.normalizeTargetUrl(location.href)) return;
     installPanel();
     const settings = (await chrome.storage.sync.get(SETTINGS_KEY))[SETTINGS_KEY]; const rules = InstagramCommentRules.prepareRules(settings || {});
-    if (!settings?.enabled || rules.targetUrl !== InstagramCommentRules.normalizeTargetUrl(location.href) || !settings.autoRefresh) return;
-    const restored = await send({ type: 'ICC_GET_SESSION', targetUrl: rules.targetUrl });
-    if (restored.snapshot?.running) await start(restored.snapshot.stats);
+    if (rules.targetUrl !== InstagramCommentRules.normalizeTargetUrl(location.href)) return;
   }
   bootstrap().catch((error) => { run.state = 'error'; run.error = error.message; draw(); });
 })();

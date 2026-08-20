@@ -21,11 +21,6 @@
 
       <form id="settingsForm" class="form">
         <label class="field">
-          <span>启用功能</span>
-          <input id="enabled" type="checkbox" />
-        </label>
-
-        <label class="field">
           <span>平台</span>
           <select id="platform" disabled>
             <option value="instagram">Instagram</option>
@@ -58,7 +53,6 @@
 
         <div class="toggles">
           <label><input id="previewMode" type="checkbox" checked /> 预览模式（不打开删除菜单）</label>
-          <label><input id="autoRefresh" type="checkbox" checked /> 自动刷新后继续扫描</label>
         </div>
 
         <fieldset class="advanced">
@@ -69,8 +63,6 @@
             <label>每轮最大删除数<input id="batchLimit" type="number" min="1" /></label>
             <label>最小冷却时间（秒）<input id="cooldownMin" type="number" min="1" /></label>
             <label>最大冷却时间（秒）<input id="cooldownMax" type="number" min="1" /></label>
-            <label>最小刷新间隔（秒）<input id="refreshMin" type="number" min="1" /></label>
-            <label>最大刷新间隔（秒）<input id="refreshMax" type="number" min="1" /></label>
             <label>会话最大删除数<input id="sessionLimit" type="number" min="1" /></label>
             <label>会话最长时间（分钟）<input id="sessionMaxMinutes" type="number" min="1" /></label>
           </div>
