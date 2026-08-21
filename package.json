@@ -1,0 +1,7 @@
+{
+  "private": true,
+  "scripts": {
+    "test": "node --test",
+    "package": "node scripts/package-extension.mjs"
+  }
+}
