@@ -116,11 +116,13 @@ async function launch(mode) {
   try {
     const settings = validateSettings(collectSettings());
     await saveSettings(settings);
-    const tabs = await chrome.tabs.query({ lastFocusedWindow: true });
-    const tab = tabs.find((item) => InstagramCommentRules.normalizeTargetUrl(item.url || '') === settings.targetPostUrl);
-    if (!tab?.id) throw new Error('请先打开与目标 URL 完全匹配的 Instagram 帖子页面。');
-    const response = await chrome.tabs.sendMessage(tab.id, { type: mode === 'preview' ? 'ICC_PREVIEW' : 'ICC_START' }).catch(() => null);
-    if (!response?.ok) throw new Error(response?.reason || '当前页面尚未加载清理器，请刷新 Instagram 页面后重试。');
+    setStatus('页面加载中...');
+    const response = await chrome.runtime.sendMessage({
+      type: 'ICC_LAUNCH',
+      targetUrl: settings.targetPostUrl,
+      mode,
+    });
+    if (!response?.ok) throw new Error(response?.reason || '启动失败');
     setStatus(mode === 'preview' ? '预览已开始' : '已开始');
   } catch (error) {
     setStatus(error.message || '启动失败');
