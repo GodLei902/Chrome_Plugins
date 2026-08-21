@@ -1,0 +1,11 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const vm = require('node:vm');
+const context = { globalThis: {}, Math, JSON, Number, Array, Set, String, Object };
+context.globalThis = context;
+for (const file of ['src/shared/action-pace-config.js', 'src/shared/delay-generator.js', 'src/shared/backoff.js', 'src/shared/action-pace-controller.js', 'src/shared/rate-limiter.js']) vm.runInNewContext(fs.readFileSync(file, 'utf8'), context);
+test('延迟始终在配置范围内', () => { const config = { distribution: 'log-normal', meanSeconds: 18, minSeconds: 12, maxSeconds: 30, variability: 'high' }; for (let i = 0; i < 100; i += 1) { const value = context.InstagramCommentDelay.generateDelayMs(config); assert.ok(value >= 12000 && value <= 30000); } });
+test('状态机在连续上限后休息并重置', () => { const pace = new context.InstagramCommentPaceController({ maxConsecutive: 2, backoff: { maxFailures: 3 } }); pace.begin(); assert.equal(pace.success(), 'NORMAL'); pace.begin(); assert.equal(pace.success(), 'REST'); pace.restComplete(); assert.equal(pace.consecutive, 0); assert.equal(pace.state, 'NORMAL'); });
+test('限频窗口不超额且返回等待时间', () => { const limiter = new context.InstagramCommentRateLimiter(); assert.equal(limiter.acquire({ perMinute: 2, perHour: 3 }, 1000).ok, true); assert.equal(limiter.acquire({ perMinute: 2, perHour: 3 }, 1001).ok, true); const blocked = limiter.acquire({ perMinute: 2, perHour: 3 }, 1002); assert.equal(blocked.ok, false); assert.ok(blocked.retryAfterMs > 0); });
+test('旧设置迁移到节奏配置', () => { const settings = context.InstagramCommentPaceConfig.normalizeSettings({ deleteDelayMin: 10, deleteDelayMax: 20, cooldownMin: 40, cooldownMax: 80, batchLimit: 4 }); assert.equal(settings.pace.operation.meanSeconds, 15); assert.equal(settings.pace.rest.meanSeconds, 60); assert.equal(settings.pace.maxConsecutive, 4); });

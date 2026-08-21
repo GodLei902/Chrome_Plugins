@@ -1,5 +1,8 @@
+importScripts('../shared/rate-limiter.js');
+
 const SNAPSHOT_PREFIX = 'instagramCommentCleanerSession:';
 const LOCK_PREFIX = 'instagramCommentCleanerLock:';
+const RATE_LIMIT_KEY = 'instagramCommentCleanerRateLimit';
 const LEASE_MS = 90 * 1000;
 
 function normalizeTargetUrl(value) {
@@ -80,6 +83,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const current = (await chrome.storage.local.get(key))[key];
       if (!current || current.tabId === sender.tab?.id) await chrome.storage.local.remove(key);
       return sendResponse({ ok: true });
+    }
+    if (message.type === 'ICC_RENEW_LOCK') {
+      const current = (await chrome.storage.local.get(key))[key];
+      if (!current || current.tabId !== sender.tab?.id) return sendResponse({ ok: false, reason: '帖子锁已失效。' });
+      await chrome.storage.local.set({ [key]: { ...current, expiresAt: Date.now() + LEASE_MS } });
+      return sendResponse({ ok: true });
+    }
+    if (message.type === 'ICC_RATE_ACQUIRE') {
+      const stored = (await chrome.storage.local.get(RATE_LIMIT_KEY))[RATE_LIMIT_KEY];
+      const limiter = new InstagramCommentRateLimiter(stored);
+      const result = limiter.acquire(message.limits || { perMinute: 5, perHour: 60 });
+      await chrome.storage.local.set({ [RATE_LIMIT_KEY]: limiter.snapshot() });
+      return sendResponse(result);
     }
     const snapshotKey = `${SNAPSHOT_PREFIX}${message.targetUrl}`;
     if (message.type === 'ICC_SAVE_SESSION') await chrome.storage.local.set({ [snapshotKey]: message.snapshot });

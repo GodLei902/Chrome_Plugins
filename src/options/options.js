@@ -1,137 +1,16 @@
 const STORAGE_KEY = 'socialCommentCleanerSettings';
-
-const DEFAULT_SETTINGS = {
-  platform: 'instagram',
-  targetPostUrl: '',
-  whitelist: '',
-  deleteKeywords: '',
-  deleteDelayMin: 12, deleteDelayMax: 25, batchLimit: 3,
-  cooldownMin: 120, cooldownMax: 300,
-  sessionLimit: 30, sessionMaxMinutes: 120,
-};
-
 const form = document.getElementById('settingsForm');
-const platformInput = document.getElementById('platform');
-const targetPostUrlInput = document.getElementById('targetPostUrl');
-const whitelistInput = document.getElementById('whitelist');
-const deleteKeywordsInput = document.getElementById('deleteKeywords');
-const statusEl = document.getElementById('status');
-const settingInputs = [...form.querySelectorAll('input, textarea, select')];
+const status = document.getElementById('status');
+const input = (id) => document.getElementById(id);
+const value = (id) => input(id).value;
+function collect() { return { platform: 'instagram', targetPostUrl: value('targetPostUrl'), whitelist: value('whitelist'), deleteKeywords: value('deleteKeywords'), sessionLimit: value('sessionLimit'), sessionMaxMinutes: value('sessionMaxMinutes'), pace: { operation: { distribution: 'log-normal', meanSeconds: value('operationMean'), minSeconds: value('operationMin'), maxSeconds: value('operationMax'), variability: value('operationVariability') }, rest: { distribution: 'log-normal', meanSeconds: value('restMean'), minSeconds: value('restMin'), maxSeconds: value('restMax'), variability: value('restVariability') }, maxConsecutive: value('maxConsecutive'), rateLimit: { perMinute: value('perMinute'), perHour: value('perHour') }, backoff: { baseSeconds: value('backoffBase'), maxSeconds: value('backoffMax'), jitterRatio: 0.25, maxFailures: value('backoffFailures') } } }; }
+function render(settings) { const pace = settings.pace; const fields = { targetPostUrl: settings.targetPostUrl, whitelist: settings.whitelist, deleteKeywords: settings.deleteKeywords, sessionLimit: settings.sessionLimit, sessionMaxMinutes: settings.sessionMaxMinutes, operationMean: pace.operation.meanSeconds, operationMin: pace.operation.minSeconds, operationMax: pace.operation.maxSeconds, operationVariability: pace.operation.variability, restMean: pace.rest.meanSeconds, restMin: pace.rest.minSeconds, restMax: pace.rest.maxSeconds, restVariability: pace.rest.variability, maxConsecutive: pace.maxConsecutive, perMinute: pace.rateLimit.perMinute, perHour: pace.rateLimit.perHour, backoffBase: pace.backoff.baseSeconds, backoffMax: pace.backoff.maxSeconds, backoffFailures: pace.backoff.maxFailures }; Object.entries(fields).forEach(([id, fieldValue]) => { input(id).value = fieldValue; }); updateSummary(); }
+function updateSummary() { document.getElementById('advancedSummary').textContent = `当前：每分钟 ${value('perMinute')} 次、每小时 ${value('perHour')} 次、失败 ${value('backoffFailures')} 次后暂停`; }
+function validate(requireTarget) { const settings = InstagramCommentPaceConfig.validateSettings(collect()); const target = InstagramCommentRules.normalizeTargetUrl(settings.targetPostUrl); if (requireTarget && !target) { input('targetPostUrl').setAttribute('aria-invalid', 'true'); throw new Error('请输入 Instagram 帖子或 Reels 的完整 URL。'); } input('targetPostUrl').removeAttribute('aria-invalid'); return { ...settings, targetPostUrl: target || settings.targetPostUrl }; }
+async function save(requireTarget = false) { const settings = validate(requireTarget); await chrome.storage.sync.set({ [STORAGE_KEY]: settings }); updateSummary(); return settings; }
 let saveTimer;
-
-function normalizeSettings(raw) {
-  const result = {
-    platform: typeof raw?.platform === 'string' ? raw.platform : DEFAULT_SETTINGS.platform,
-    targetPostUrl: typeof raw?.targetPostUrl === 'string' ? raw.targetPostUrl.trim() : '',
-    whitelist: typeof raw?.whitelist === 'string' ? raw.whitelist.trim() : '',
-    deleteKeywords: typeof raw?.deleteKeywords === 'string' ? raw.deleteKeywords.trim() : '',
-  };
-  for (const key of ['deleteDelayMin', 'deleteDelayMax', 'batchLimit', 'cooldownMin', 'cooldownMax', 'sessionLimit', 'sessionMaxMinutes']) {
-    result[key] = Number(raw?.[key]) > 0 ? Number(raw[key]) : DEFAULT_SETTINGS[key];
-  }
-  return result;
-}
-
-async function loadSettings() {
-  const result = await chrome.storage.sync.get(STORAGE_KEY);
-  return normalizeSettings(result[STORAGE_KEY] || DEFAULT_SETTINGS);
-}
-
-async function saveSettings(settings) {
-  await chrome.storage.sync.set({ [STORAGE_KEY]: settings });
-}
-
-function renderSettings(settings) {
-  platformInput.value = settings.platform;
-  targetPostUrlInput.value = settings.targetPostUrl;
-  whitelistInput.value = settings.whitelist;
-  deleteKeywordsInput.value = settings.deleteKeywords;
-  for (const key of ['deleteDelayMin', 'deleteDelayMax', 'batchLimit', 'cooldownMin', 'cooldownMax', 'sessionLimit', 'sessionMaxMinutes']) document.getElementById(key).value = settings[key];
-}
-
-function collectSettings() {
-  return normalizeSettings({
-    platform: platformInput.value,
-    targetPostUrl: targetPostUrlInput.value,
-    whitelist: whitelistInput.value,
-    deleteKeywords: deleteKeywordsInput.value,
-    ...Object.fromEntries(['deleteDelayMin', 'deleteDelayMax', 'batchLimit', 'cooldownMin', 'cooldownMax', 'sessionLimit', 'sessionMaxMinutes'].map((key) => [key, document.getElementById(key).value])),
-  });
-}
-
-function setStatus(message) {
-  statusEl.textContent = message;
-}
-
-function clearValidationState() {
-  targetPostUrlInput.removeAttribute('aria-invalid');
-}
-
-function validateSettings(settings) {
-  clearValidationState();
-  const normalizedTargetUrl = InstagramCommentRules.normalizeTargetUrl(settings.targetPostUrl);
-  if (!normalizedTargetUrl) {
-    targetPostUrlInput.setAttribute('aria-invalid', 'true');
-    targetPostUrlInput.focus();
-    throw new Error('请输入 Instagram 帖子或 Reels 的完整 URL。');
-  }
-  if (settings.deleteDelayMin > settings.deleteDelayMax || settings.cooldownMin > settings.cooldownMax) {
-    throw new Error('每组最小值不能大于最大值。');
-  }
-  return { ...settings, targetPostUrl: normalizedTargetUrl };
-}
-
-function normalizeTarget(settings) {
-  const normalizedTargetUrl = InstagramCommentRules.normalizeTargetUrl(settings.targetPostUrl);
-  return normalizedTargetUrl ? { ...settings, targetPostUrl: normalizedTargetUrl } : settings;
-}
-
-async function persistCurrentSettings() {
-  await saveSettings(normalizeTarget(collectSettings()));
-}
-
-function scheduleAutoSave() {
-  clearTimeout(saveTimer);
-  saveTimer = setTimeout(async () => {
-    try {
-      await persistCurrentSettings();
-    } catch (error) {
-      setStatus(error.message || '自动保存失败');
-    }
-  }, 350);
-}
-
-document.addEventListener('DOMContentLoaded', async () => {
-  renderSettings(await loadSettings());
-  settingInputs.forEach((input) => input.addEventListener('input', () => {
-    clearValidationState();
-    scheduleAutoSave();
-  }));
-  settingInputs.forEach((input) => input.addEventListener('change', scheduleAutoSave));
-});
-
-async function launch(mode) {
-  setStatus('准备开始...');
-
-  try {
-    const settings = validateSettings(collectSettings());
-    await saveSettings(settings);
-    setStatus('页面加载中...');
-    const response = await chrome.runtime.sendMessage({
-      type: 'ICC_LAUNCH',
-      targetUrl: settings.targetPostUrl,
-      mode,
-    });
-    if (!response?.ok) throw new Error(response?.reason || '启动失败');
-    setStatus(mode === 'preview' ? '预览已开始' : '已开始');
-  } catch (error) {
-    setStatus(error.message || '启动失败');
-  }
-}
-
-form.addEventListener('submit', (event) => {
-  event.preventDefault();
-  launch('run');
-});
-
-document.getElementById('previewButton').addEventListener('click', () => launch('preview'));
+function scheduleSave() { clearTimeout(saveTimer); saveTimer = setTimeout(() => save(false).catch((error) => { status.textContent = error.message || '自动保存失败'; }), 350); }
+async function launch(mode) { try { status.textContent = '准备开始...'; const settings = await save(true); const response = await chrome.runtime.sendMessage({ type: 'ICC_LAUNCH', targetUrl: settings.targetPostUrl, mode }); if (!response?.ok) throw new Error(response?.reason || '启动失败'); status.textContent = mode === 'preview' ? '预览已开始' : '已开始'; } catch (error) { status.textContent = error.message || '启动失败'; } }
+document.addEventListener('DOMContentLoaded', async () => { const stored = (await chrome.storage.sync.get(STORAGE_KEY))[STORAGE_KEY]; render(InstagramCommentPaceConfig.normalizeSettings(stored)); form.querySelectorAll('input,textarea,select').forEach((node) => node.addEventListener('input', scheduleSave)); });
+form.addEventListener('submit', (event) => { event.preventDefault(); launch('run'); });
+input('previewButton').addEventListener('click', () => launch('preview'));
