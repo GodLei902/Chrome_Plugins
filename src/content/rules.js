@@ -49,6 +49,7 @@
       }
       if (isWhitelisted(thread, rules)) { skipped++; continue; }
       if (thread.replies.some((reply) => isWhitelisted(reply, rules))) { skipped++; continue; }
+      if (thread.hasUnloadedReplies) { skipped++; continue; }
       if (matchesKeyword(thread, rules)) candidates.push({ ...thread, kind: 'comment' });
     }
     return { candidates: candidates.sort((a, b) => (a.kind === 'reply' ? -1 : 1) - (b.kind === 'reply' ? -1 : 1)), scanned, skipped };
