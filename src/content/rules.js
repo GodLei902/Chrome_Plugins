@@ -45,16 +45,27 @@
     return rules.keywords.some((keyword) => text.includes(keyword));
   }
 
+  // Instagram 偶尔会把回复组织成多层 parent_comment_id；递归展开后，
+  // 无论父级作者是谁，只要当前回复命中规则就能进入候选。
+  function replyItems(replies, parent, result = []) {
+    for (const reply of replies || []) {
+      result.push({ reply, parent });
+      replyItems(reply.replies, parent, result);
+    }
+    return result;
+  }
+
   function selectCandidates(threads, rules) {
     const candidates = [];
     const skippedIds = [];
     let scanned = 0;
     let skipped = 0;
     for (const thread of threads) {
-      scanned += thread.replies.length;
-      for (const reply of thread.replies) {
+      const descendants = replyItems(thread.replies, thread);
+      scanned += descendants.length;
+      for (const { reply, parent } of descendants) {
         if (isAuthorComment(reply, rules) || isWhitelisted(reply, rules)) { skipped++; if (reply.id) skippedIds.push(reply.id); continue; }
-        if (matchesKeyword(reply, rules)) candidates.push({ ...reply, kind: 'reply', parent: thread });
+        if (matchesKeyword(reply, rules)) candidates.push({ ...reply, kind: 'reply', parent });
       }
     }
     return { candidates, skippedIds, scanned, skipped };

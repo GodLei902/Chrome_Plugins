@@ -29,6 +29,26 @@ test('命中关键词的子级回复进入候选', () => {
   assert.equal(result.candidates[0].kind, 'reply');
 });
 
+test('帖子作者的一级评论下，其他用户的命中回复进入候选', () => {
+  const rules = context.InstagramCommentRules.prepareRules({ deleteKeywords: 'spam', whitelist: '' });
+  const result = context.InstagramCommentRules.selectCandidates([{
+    username: 'post-owner', isPostAuthor: true, text: '正常内容',
+    replies: [{ id: 'r-author-child', username: 'visitor', text: 'spam' }],
+  }], rules);
+  assert.equal(result.candidates.length, 1);
+  assert.equal(result.candidates[0].id, 'r-author-child');
+});
+
+test('多级嵌套回复也会递归扫描', () => {
+  const rules = context.InstagramCommentRules.prepareRules({ deleteKeywords: 'spam', whitelist: '' });
+  const result = context.InstagramCommentRules.selectCandidates([{
+    username: 'post-owner', isPostAuthor: true, text: '正常内容',
+    replies: [{ id: 'r1', username: 'visitor', text: '普通回复', replies: [{ id: 'r2', username: 'visitor2', text: 'spam' }] }],
+  }], rules);
+  assert.equal(result.candidates.length, 1);
+  assert.equal(result.candidates[0].id, 'r2');
+});
+
 test('命中关键词的一级评论不会进入候选', () => {
   const rules = context.InstagramCommentRules.prepareRules({ deleteKeywords: 'spam', whitelist: '' });
   const result = context.InstagramCommentRules.selectCandidates([{ username: 'visitor', text: 'spam', replies: [] }], rules);

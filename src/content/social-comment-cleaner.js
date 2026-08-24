@@ -87,8 +87,9 @@
       }
     } catch { /* Ignore unrelated JSON. */ }
     const authorUsername = authors.values().next().value || (allAuthors.size === 1 ? allAuthors.values().next().value : '');
-    const mapped = [...source.values()].map((comment) => ({ ...comment, isPostAuthor: Boolean(authorUsername) && InstagramCommentRules.normalizeUsername(comment.username) === InstagramCommentRules.normalizeUsername(authorUsername), element: locateCommentElement(comment) }));
-    const all = new Map(mapped.filter((item) => item.element).map((item) => [item.id, { ...item, replies: [] }]));
+    // 扫描阶段只使用结构化数据；DOM 节点可能尚未渲染，删除时再按候选重新定位。
+    const mapped = [...source.values()].map((comment) => ({ ...comment, isPostAuthor: Boolean(authorUsername) && InstagramCommentRules.normalizeUsername(comment.username) === InstagramCommentRules.normalizeUsername(authorUsername) }));
+    const all = new Map(mapped.map((item) => [item.id, { ...item, replies: [] }]));
     const parents = []; const orphanReplies = new Map();
     for (const item of all.values()) {
       const parent = all.get(item.parentId);
@@ -102,7 +103,13 @@
     parents.forEach((item) => { item.hasUnloadedReplies = item.childCount > item.replies.length; });
     return parents;
   }
-  function replyIds(list) { return new Set(list.flatMap((thread) => thread.replies.map((reply) => reply.id)).filter(Boolean)); }
+  // 与规则引擎保持一致，收集多层已加载回复的稳定 ID，避免漏掉嵌套回复。
+  function replyIds(list) {
+    const ids = new Set();
+    const visit = (replies) => (replies || []).forEach((reply) => { if (reply.id) ids.add(reply.id); visit(reply.replies); });
+    list.forEach((thread) => visit(thread.replies));
+    return ids;
+  }
   async function scan() {
     run.state = 'scanning'; draw();
     if (/(challenge_required|try again later|验证|verification|rate limit)/i.test(document.body.innerText)) throw new Error('检测到验证、限流或异常页面，已暂停。');
@@ -144,7 +151,9 @@
     return waitForCondition(() => !candidate.element.isConnected || !visible(candidate.element) || !normalizedText(candidate.element).includes(expectedText), 7000, '正在确认回复已删除...');
   }
   async function remove(candidate) {
-    if (!candidate.element?.isConnected) throw new Error('目标回复已被页面刷新，正在重新扫描。');
+    // 候选来自接口数据，只有执行删除时才要求对应 DOM 已渲染。
+    candidate.element = locateCommentElement(candidate);
+    if (!candidate.element?.isConnected) throw new Error('目标回复尚未渲染到页面，正在重新扫描。');
     candidate.element.scrollIntoView({ block: 'center', behavior: 'auto' });
     ['pointerover', 'mouseover', 'mousemove'].forEach((type) => candidate.element.dispatchEvent(new MouseEvent(type, { bubbles: true })));
     candidate.element.focus?.();
