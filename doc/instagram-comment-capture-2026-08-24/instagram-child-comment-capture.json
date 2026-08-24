@@ -1,0 +1,136 @@
+[
+  {
+    "parent_comment_id": "18118670534314629",
+    "request": {
+      "method": "GET",
+      "url": "https://www.instagram.com/graphql/query/?doc_id=27823744063932558&variables=%7B%22media_id%22%3A%223970475254647536658%22%2C%22parent_comment_id%22%3A%2218118670534314629%22%2C%22__relay_internal__pv__PolarisIsLoggedInrelayprovider%22%3Atrue%7D",
+      "headers": {
+        "User-Agent": "Mozilla/5.0",
+        "X-IG-App-ID": "936619743392459"
+      }
+    },
+    "response": {
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": {
+        "data": {
+          "xdt_api__v1__media__media_id__comments__parent_comment_id__child_comments__connection": {
+            "edges": [
+              {
+                "node": {
+                  "pk": "17982004416071214",
+                  "child_comment_count": 0,
+                  "restricted_status": null,
+                  "has_translation": null,
+                  "user": {
+                    "pk": "36596999273",
+                    "is_unpublished": null,
+                    "profile_pic_url": "https://scontent-sjc6-1.cdninstagram.com/v/t51.2885-19/573323465_1219825463302212_7278921664109726296_n.png?stp=dst-webp&efg=eyJ2ZW5jb2RlX3RhZyI6InByb2ZpbGVfcGljLmRqYW5nby4xNTAuYzIifQ&_nc_ht=scontent-sjc6-1.cdninstagram.com&_nc_cat=1&_nc_oc=Q6cZ2gHRWCbxFhhv_Gf3aKsXTvPR95bbJS3qXINN_2w77Jf0BB84UbPKi5yFv8-C9mfjb4qmYNbxM5LEuIU8UtNHB22I&_nc_ohc=lPHSP0gNIksQ7kNvwFZYIrE&_nc_gid=-GfgYgRl6pkbZJGUqGqSbA&edm=APs17CUBAAAA&ccb=7-5&ig_cache_key=YW5vbnltb3VzX3Byb2ZpbGVfcGlj.3-ccb7-5&oh=00_AQEbYL93QuC6r9YQ_AnOcV8kxng65HS6Y80GPl7Y0gMjKw&oe=6A91B4EA&_nc_sid=10d13b",
+                    "username": "godlei_001",
+                    "id": "36596999273",
+                    "is_verified": false,
+                    "fbid_v2": "17841436698204624"
+                  },
+                  "has_liked_comment": null,
+                  "text": "@godlei_001 良いLine資料を送付する",
+                  "giphy_media_info": null,
+                  "created_at": 1787549664,
+                  "is_edited": null,
+                  "parent_comment_id": "18118670534314629",
+                  "is_covered": false,
+                  "fallback_user_info": null,
+                  "comment_like_count": null,
+                  "__typename": "XDTCommentDict"
+                },
+                "cursor": ""
+              }
+            ],
+            "page_info": {
+              "end_cursor": null,
+              "has_next_page": false,
+              "has_previous_page": false,
+              "start_cursor": null
+            }
+          }
+        },
+        "extensions": {
+          "is_final": true,
+          "server_metadata": {
+            "request_start_time_ms": 1787553771528,
+            "time_at_flush_ms": 1787553771611
+          }
+        },
+        "status": "ok"
+      }
+    }
+  },
+  {
+    "parent_comment_id": "17942638671319233",
+    "request": {
+      "method": "GET",
+      "url": "https://www.instagram.com/graphql/query/?doc_id=27823744063932558&variables=%7B%22media_id%22%3A%223970475254647536658%22%2C%22parent_comment_id%22%3A%2217942638671319233%22%2C%22__relay_internal__pv__PolarisIsLoggedInrelayprovider%22%3Atrue%7D",
+      "headers": {
+        "User-Agent": "Mozilla/5.0",
+        "X-IG-App-ID": "936619743392459"
+      }
+    },
+    "response": {
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": {
+        "data": {
+          "xdt_api__v1__media__media_id__comments__parent_comment_id__child_comments__connection": {
+            "edges": [
+              {
+                "node": {
+                  "pk": "18454227652190233",
+                  "child_comment_count": 0,
+                  "restricted_status": null,
+                  "has_translation": null,
+                  "user": {
+                    "pk": "36596999273",
+                    "is_unpublished": null,
+                    "profile_pic_url": "https://instagram.fyvr3-1.fna.fbcdn.net/v/t51.2885-19/573323465_1219825463302212_7278921664109726296_n.png?stp=dst-jpg_s150x150_tt6&efg=eyJ2ZW5jb2RlX3RhZyI6InByb2ZpbGVfcGljLmRqYW5nby4xNTAuYzIifQ&_nc_ht=instagram.fyvr3-1.fna.fbcdn.net&_nc_cat=1&_nc_oc=Q6cZ2gGZw7IxpNH0H1hl57aRiEcOqT4WvFRwrRW_GZZgZqmDDCjemBnegoWW7ANKM5ajFYg&_nc_ohc=lPHSP0gNIksQ7kNvwGOCe3F&_nc_gid=IJpvN6fpIqUnJ_zRgEhxoQ&edm=AOmzUmYBAAAA&ccb=7-5&ig_cache_key=YW5vbnltb3VzX3Byb2ZpbGVfcGlj.3-ccb7-5&oh=00_AQHGAtMl6tcgoFL5-063hZJ6gi5oCikVZam2taRrkEUr6w&oe=6A91B4EA&_nc_sid=13eb94",
+                    "username": "godlei_001",
+                    "id": "36596999273",
+                    "is_verified": false,
+                    "fbid_v2": "17841436698204624"
+                  },
+                  "has_liked_comment": null,
+                  "text": "@hp520909 良いLINE良い",
+                  "giphy_media_info": null,
+                  "created_at": 1787549636,
+                  "is_edited": null,
+                  "parent_comment_id": "17942638671319233",
+                  "is_covered": false,
+                  "fallback_user_info": null,
+                  "comment_like_count": null,
+                  "__typename": "XDTCommentDict"
+                },
+                "cursor": ""
+              }
+            ],
+            "page_info": {
+              "end_cursor": null,
+              "has_next_page": false,
+              "has_previous_page": false,
+              "start_cursor": null
+            }
+          }
+        },
+        "extensions": {
+          "is_final": true,
+          "server_metadata": {
+            "request_start_time_ms": 1787553772534,
+            "time_at_flush_ms": 1787553772608
+          }
+        },
+        "status": "ok"
+      }
+    }
+  }
+]

@@ -51,9 +51,19 @@ data.xdt_api__v1__media__media_id__comments__connection.edges[].node
 
 - 帖子主体：`PolarisPostRootQuery`，`doc_id=39012401901691788`，根字段为 `xdt_api__v1__media__shortcode__web_info`
 - 评论分页：`PolarisPostCommentsPaginationQuery`，`doc_id=28082902984733691`
-- 评论回复：`PolarisPostCommentsChildrenPaginationtQuery`，`doc_id=27229753410037873`
+- 点击一级评论的“查看回复”后首次加载子级评论：`PolarisPostChildCommentsQuery`，`doc_id=27823744063932558`
+- 已展开回复继续分页（“查看更多回复”）：`PolarisPostCommentsChildrenPaginationtQuery`，`doc_id=27229753410037873`
 
-前端脚本中的字段名显示，回复接口对应：
+首次子级评论请求的变量只有父评论定位所需的字段：
+
+```json
+{
+  "media_id": "3970475254647536658",
+  "parent_comment_id": "18118670534314629"
+}
+```
+
+前端脚本中的字段名显示，子级评论接口对应：
 
 ```text
 xdt_api__v1__media__media_id__comments__parent_comment_id__child_comments__connection
@@ -61,6 +71,6 @@ xdt_api__v1__media__media_id__comments__parent_comment_id__child_comments__conne
 
 ## 复现与限制
 
-已使用与页面相同的 GraphQL `doc_id`、媒体 ID 和 Relay 登录状态变量取得 HTTP 200 JSON 响应，并保存完整报文。当前 Chrome 控制接口未开放 DevTools Network 事件，因此本记录是对页面实际 GraphQL 请求的精确复现，不包含浏览器 Network 面板中的原始请求头全集或底层事件时间线。
+已使用与页面相同的 GraphQL `doc_id`、媒体 ID、父评论 ID 和 Relay 登录状态变量取得 HTTP 200 JSON 响应，并保存两条父评论的完整子级报文。当前 Chrome 控制接口未开放 DevTools Network 事件，因此本记录是对页面实际 GraphQL 请求的精确复现，不包含浏览器 Network 面板中的原始请求头全集或底层事件时间线。
 
 此数据仅用于当前帖子评论结构分析；不应据此绕过登录、权限或 Instagram 风控机制。
