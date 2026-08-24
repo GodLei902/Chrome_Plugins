@@ -32,6 +32,14 @@
     return rules.whitelist.has(normalizeUsername(comment.username));
   }
 
+  // 帖子作者的评论和回复始终保留，优先级高于关键词匹配。
+  function isAuthorComment(comment, rules) {
+    return Boolean(comment.isPostAuthor) || (
+      Boolean(rules.authorUsername) &&
+      normalizeUsername(comment.username) === normalizeUsername(rules.authorUsername)
+    );
+  }
+
   function matchesKeyword(comment, rules) {
     const text = String(comment.text || '').toLocaleLowerCase();
     return rules.keywords.some((keyword) => text.includes(keyword));
@@ -44,16 +52,16 @@
     for (const thread of threads) {
       scanned += 1 + thread.replies.length;
       for (const reply of thread.replies) {
-        if (isWhitelisted(reply, rules)) { skipped++; continue; }
+        if (isAuthorComment(reply, rules) || isWhitelisted(reply, rules)) { skipped++; continue; }
         if (matchesKeyword(reply, rules)) candidates.push({ ...reply, kind: 'reply', parent: thread });
       }
-      if (isWhitelisted(thread, rules)) { skipped++; continue; }
-      if (thread.replies.some((reply) => isWhitelisted(reply, rules))) { skipped++; continue; }
+      if (isAuthorComment(thread, rules) || isWhitelisted(thread, rules)) { skipped++; continue; }
+      if (thread.replies.some((reply) => isAuthorComment(reply, rules) || isWhitelisted(reply, rules))) { skipped++; continue; }
       if (thread.hasUnloadedReplies) { skipped++; continue; }
       if (matchesKeyword(thread, rules)) candidates.push({ ...thread, kind: 'comment' });
     }
     return { candidates: candidates.sort((a, b) => (a.kind === 'reply' ? -1 : 1) - (b.kind === 'reply' ? -1 : 1)), scanned, skipped };
   }
 
-  global.InstagramCommentRules = { normalizeUsername, normalizeTargetUrl, prepareRules, isWhitelisted, matchesKeyword, selectCandidates };
+  global.InstagramCommentRules = { normalizeUsername, normalizeTargetUrl, prepareRules, isWhitelisted, isAuthorComment, matchesKeyword, selectCandidates };
 })(globalThis);
