@@ -1,11 +1,12 @@
 (function (global) {
   'use strict';
 
+  // 面向普通用户的默认节奏：扩大单批处理量并缩短休息，同时保留操作间隔与全局限频安全边界。
   const DEFAULTS = {
     operation: { distribution: 'log-normal', meanSeconds: 18, minSeconds: 12, maxSeconds: 30, variability: 'medium' },
-    rest: { distribution: 'log-normal', meanSeconds: 180, minSeconds: 120, maxSeconds: 300, variability: 'medium' },
-    deleteDialogDelay: { distribution: 'log-normal', meanSeconds: 20, minSeconds: 10, maxSeconds: 30, variability: 'medium' },
-    maxConsecutive: 3,
+    rest: { distribution: 'log-normal', meanSeconds: 60, minSeconds: 45, maxSeconds: 90, variability: 'medium' },
+    deleteDialogDelay: { distribution: 'log-normal', meanSeconds: 20, minSeconds: 5, maxSeconds: 25, variability: 'medium' },
+    maxConsecutive: 20,
     rateLimit: { perMinute: 5, perHour: 60 },
     backoff: { baseSeconds: 30, maxSeconds: 900, jitterRatio: 0.25, maxFailures: 3 },
   };
@@ -13,18 +14,20 @@
   function positive(value, fallback) { return Number(value) > 0 ? Number(value) : fallback; }
   function sessionLimit(value) {
     if (String(value || '').trim().toLocaleLowerCase() === 'unlimited' || Number(value) === 0) return 'unlimited';
-    return positive(value, 30);
+    return positive(value, 100);
   }
   function clone(value) { return JSON.parse(JSON.stringify(value)); }
   function normalizeDistribution(raw, fallback) {
     const source = raw || {};
+    const hasSourceValues = Object.keys(source).length > 0;
     const minSeconds = positive(source.minSeconds, fallback.minSeconds);
     const maxSeconds = positive(source.maxSeconds, fallback.maxSeconds);
     return {
       distribution: source.distribution === 'gamma' ? 'gamma' : 'log-normal',
       minSeconds,
       maxSeconds,
-      meanSeconds: positive(source.meanSeconds, (minSeconds + maxSeconds) / 2),
+      // 完全没有保存过该配置时使用产品默认平均值；只有旧配置提供了边界时才取边界中点迁移。
+      meanSeconds: positive(source.meanSeconds, hasSourceValues ? (minSeconds + maxSeconds) / 2 : fallback.meanSeconds),
       variability: ['low', 'medium', 'high'].includes(source.variability) ? source.variability : 'medium',
     };
   }
