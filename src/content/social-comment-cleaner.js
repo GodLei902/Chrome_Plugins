@@ -1,8 +1,8 @@
 (function () {
   'use strict';
   const KEY = 'socialCommentCleanerSettings';
-  const TEXT = { idle: '空闲', scanning: '扫描中', running: '运行中', 'cooling-down': '休息中', loading: '滚动加载中', completed: '已完成', paused: '已暂停', error: '错误' };
-  const run = { stopped: true, paused: false, starting: false, state: 'idle', stats: { scanned: 0, deleted: 0, skipped: 0, loaded: 0, scrollRounds: 0, emptyRounds: 0 }, candidates: [], timer: null, lockTimer: null, waiting: '', error: '', seenIds: new Set(), skippedIds: new Set(), processedIds: new Set(), lastScanIds: new Set() };
+  const TEXT = { idle: '空闲', scanning: '扫描中', running: '运行中', 'cooling-down': '休息中', completed: '已完成', paused: '已暂停', error: '错误' };
+  const run = { stopped: true, paused: false, starting: false, state: 'idle', stats: { scanned: 0, deleted: 0, skipped: 0, loaded: 0 }, candidates: [], timer: null, lockTimer: null, waiting: '', error: '', seenIds: new Set(), skippedIds: new Set(), processedIds: new Set(), lastScanIds: new Set() };
   const send = (message) => chrome.runtime.sendMessage(message).catch(() => ({ ok: false, reason: '扩展后台不可用。' }));
   const visible = (node) => { const rect = node.getBoundingClientRect(); return rect.width > 0 && rect.height > 0; };
   const text = (node) => (node.innerText || node.textContent || '').trim();
@@ -32,7 +32,7 @@
     });
   }
 
-  function draw() { if (!run.ui) return; run.ui.querySelector('[data-state]').textContent = TEXT[run.state] || run.state; run.ui.querySelector('[data-stats]').textContent = `扫描 ${run.stats.scanned} · 已加载回复 ${run.stats.loaded} · 候选 ${run.candidates.length} · 删除 ${run.stats.deleted} · 跳过 ${run.stats.skipped} · 滚动 ${run.stats.scrollRounds} · 空轮 ${run.stats.emptyRounds}`; run.ui.querySelector('[data-wait]').textContent = run.waiting; run.ui.querySelector('[data-error]').textContent = run.error || ''; const active = !run.stopped && !run.paused; const busy = active || run.starting; const start = run.ui.querySelector('[data-start]'); start.textContent = run.paused ? '继续' : '开始'; start.disabled = busy; run.ui.querySelector('[data-preview]').disabled = busy || run.paused; run.ui.querySelector('[data-pause]').disabled = !active; run.ui.querySelector('[data-stop]').disabled = run.stopped; }
+  function draw() { if (!run.ui) return; run.ui.querySelector('[data-state]').textContent = TEXT[run.state] || run.state; run.ui.querySelector('[data-stats]').textContent = `扫描 ${run.stats.scanned} · 已加载回复 ${run.stats.loaded} · 候选 ${run.candidates.length} · 删除 ${run.stats.deleted} · 跳过 ${run.stats.skipped}`; run.ui.querySelector('[data-wait]').textContent = run.waiting; run.ui.querySelector('[data-error]').textContent = run.error || ''; const active = !run.stopped && !run.paused; const busy = active || run.starting; const start = run.ui.querySelector('[data-start]'); start.textContent = run.paused ? '继续' : '开始'; start.disabled = busy; run.ui.querySelector('[data-preview]').disabled = busy || run.paused; run.ui.querySelector('[data-pause]').disabled = !active; run.ui.querySelector('[data-stop]').disabled = run.stopped; }
   function panel() { if (document.getElementById('icc-host')) return; const host = document.createElement('div'); host.id = 'icc-host'; host.style.cssText = 'position:fixed;right:16px;bottom:16px;z-index:2147483647'; const root = host.attachShadow({ mode: 'open' }); root.innerHTML = `<style>main{font:13px system-ui;color:#111;background:#fff;border:1px solid #d1d5db;border-radius:8px;box-shadow:0 8px 28px #0003;width:320px;padding:14px}h2{font-size:14px;margin:0 0 10px}p{margin:7px 0}.muted{color:#666}.wait{color:#075985;min-height:1em}.error{color:#b42318;min-height:1em}.actions{display:flex;gap:6px;flex-wrap:wrap}button{border:0;border-radius:6px;padding:7px 10px;background:#2563eb;color:#fff}button[data-preview]{background:#0f766e}button[data-pause]{background:#d97706}button[data-stop]{background:#6b7280}button:disabled{opacity:.5}</style><main><h2>社交评论清理器</h2><p>状态：<b data-state>空闲</b></p><p class=muted data-stats></p><p class=wait data-wait></p><p class=error data-error></p><div class=actions><button data-start>开始</button><button data-pause>暂停</button><button data-stop>停止</button><button data-preview>预览模式</button></div></main>`; run.ui = root; document.documentElement.append(host); root.querySelector('[data-start]').onclick = () => start('run'); root.querySelector('[data-preview]').onclick = () => start('preview'); root.querySelector('[data-pause]').onclick = () => pause(); root.querySelector('[data-stop]').onclick = () => stop(); draw(); }
   function dataNodes(value, found = []) { if (!value || typeof value !== 'object') return found; for (const [key, child] of Object.entries(value)) { if (key === '__typename' && child === 'XDTCommentDict') found.push(value); dataNodes(child, found); } return found; }
   // 优先按目标 shortcode 读取媒体 owner，避免把其他推荐媒体作者当成帖子作者。
@@ -123,29 +123,35 @@
     run.lastScanIds = ids; run.state = 'idle'; draw();
     return { ids, newIds, expanded };
   }
-  function findScrollContainer() {
-    const anchor = run.candidates[0]?.element;
-    if (anchor) {
-      let node = anchor.parentElement;
-      while (node && node !== document.body) { if (node.scrollHeight > node.clientHeight + 80 && visible(node)) return node; node = node.parentElement; }
-    }
-    const candidates = [document.scrollingElement, ...document.querySelectorAll('main,section,div')].filter((node) => node && node.scrollHeight > node.clientHeight + 80 && visible(node));
-    return candidates.sort((a, b) => (b.scrollHeight - b.clientHeight) - (a.scrollHeight - a.clientHeight))[0] || document.scrollingElement;
-  }
-  async function loadNextBatch(previousIds) {
-    run.state = 'loading'; run.stats.scrollRounds += 1; draw();
-    const container = findScrollContainer(); const before = new Set(previousIds); const amount = Math.max(360, Math.floor((container.clientHeight || window.innerHeight || 720) * 0.75));
-    if (container === document.scrollingElement) window.scrollBy({ top: amount, behavior: 'auto' });
-    else container.scrollBy({ top: amount, behavior: 'auto' });
-    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-    const changed = await waitForCondition(() => {
-      const current = threads(); return current.some((thread) => thread.replies.some((reply) => reply.id && !before.has(reply.id)));
-    }, 4500, '正在等待评论区加载下一批回复...');
-    const result = await scan();
-    const added = result.newIds > 0 || result.expanded > 0;
-    if (added || changed) run.stats.emptyRounds = 0; else run.stats.emptyRounds += 1;
-    draw(); return added || changed;
-  }
+  /*
+   * 暂停自动分页和滚动加载（2026-08-24）。
+   * 当前阶段只处理 Instagram 当前评论容器中已经加载的内容，改由用户手动下滑
+   * 触发页面加载后再次启动任务。保留旧实现以便后续在确认页面结构和加载边界后恢复。
+   *
+   * function findScrollContainer() {
+   *   const anchor = run.candidates[0]?.element;
+   *   if (anchor) {
+   *     let node = anchor.parentElement;
+   *     while (node && node !== document.body) { if (node.scrollHeight > node.clientHeight + 80 && visible(node)) return node; node = node.parentElement; }
+   *   }
+   *   const candidates = [document.scrollingElement, ...document.querySelectorAll('main,section,div')].filter((node) => node && node.scrollHeight > node.clientHeight + 80 && visible(node));
+   *   return candidates.sort((a, b) => (b.scrollHeight - b.clientHeight) - (a.scrollHeight - a.clientHeight))[0] || document.scrollingElement;
+   * }
+   * async function loadNextBatch(previousIds) {
+   *   run.state = 'loading'; run.stats.scrollRounds += 1; draw();
+   *   const container = findScrollContainer(); const before = new Set(previousIds); const amount = Math.max(360, Math.floor((container.clientHeight || window.innerHeight || 720) * 0.75));
+   *   if (container === document.scrollingElement) window.scrollBy({ top: amount, behavior: 'auto' });
+   *   else container.scrollBy({ top: amount, behavior: 'auto' });
+   *   await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+   *   const changed = await waitForCondition(() => {
+   *     const current = threads(); return current.some((thread) => thread.replies.some((reply) => reply.id && !before.has(reply.id)));
+   *   }, 4500, '正在等待评论区加载下一批回复...');
+   *   const result = await scan();
+   *   const added = result.newIds > 0 || result.expanded > 0;
+   *   if (added || changed) run.stats.emptyRounds = 0; else run.stats.emptyRounds += 1;
+   *   draw(); return added || changed;
+   * }
+   */
   async function waitForDeleted(candidate) {
     const expectedText = String(candidate.text || '').replace(/\s+/g, ' ').trim();
     return waitForCondition(() => !candidate.element.isConnected || !visible(candidate.element) || !normalizedText(candidate.element).includes(expectedText), 7000, '正在确认回复已删除...');
@@ -213,8 +219,14 @@
         }
         continue;
       }
-      const before = new Set(run.lastScanIds); const loaded = await loadNextBatch(before);
-      if (!run.paused && !loaded && run.stats.emptyRounds >= 3) return stop('completed', '已完成：连续三轮没有新的可加载子级回复。');
+      // 暂停自动分页/滚动加载：当前评论容器没有候选时结束本次任务。
+      // 用户手动下滑加载更多内容后，再点击“开始”即可重新扫描新容器内容。
+      return stop('completed', '已完成：当前评论容器中没有待处理回复。');
+      /*
+       * 原自动加载流程暂时停用，保留用于后续恢复：
+       * const before = new Set(run.lastScanIds); const loaded = await loadNextBatch(before);
+       * if (!run.paused && !loaded && run.stats.emptyRounds >= 3) return stop('completed', '已完成：连续三轮没有新的可加载子级回复。');
+       */
     }
   }
   async function start(mode) {
@@ -231,7 +243,7 @@
       if (InstagramCommentRules.normalizeTargetUrl(location.href) !== run.rules.targetUrl) throw new Error('当前 URL 与设置的目标帖子不匹配。');
       const lock = await send({ type: 'ICC_ACQUIRE_LOCK', targetUrl: run.rules.targetUrl }); if (!lock.ok) throw new Error(lock.reason);
       if (!resuming) {
-        run.stopped = false; run.mode = mode; run.startedAt = Date.now(); run.seenIds = new Set(); run.skippedIds = new Set(); run.processedIds = new Set(); run.lastScanIds = new Set(); run.stats = { scanned: 0, deleted: 0, skipped: 0, loaded: 0, scrollRounds: 0, emptyRounds: 0 }; run.pace = new InstagramCommentPaceController(run.settings.pace);
+        run.stopped = false; run.mode = mode; run.startedAt = Date.now(); run.seenIds = new Set(); run.skippedIds = new Set(); run.processedIds = new Set(); run.lastScanIds = new Set(); run.stats = { scanned: 0, deleted: 0, skipped: 0, loaded: 0 }; run.pace = new InstagramCommentPaceController(run.settings.pace);
       } else {
         run.paused = false; run.error = ''; run.waiting = ''; run.state = 'idle';
         if (run.pace?.state === 'REST') run.pace.restComplete();
