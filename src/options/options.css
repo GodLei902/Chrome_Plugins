@@ -136,7 +136,8 @@ legend { padding: 0 6px; font-weight: 600; }
 }
 
 @media (max-width: 600px) {
-  body { min-width: 0; }
+  /* Chrome 扩展弹窗需要保留最小宽度，否则窄视口会把表单和标题截断。 */
+  body { min-width: 420px; }
   .page { padding: 16px; }
   .grid, .grid.three { grid-template-columns: 1fr; }
 }
