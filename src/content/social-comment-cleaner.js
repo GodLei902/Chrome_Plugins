@@ -69,9 +69,9 @@
     if (!run.ui) return;
     run.ui.querySelector('[data-state]').textContent = TEXT[run.state] || run.state;
     run.ui.querySelector('[data-stats]').textContent = `累计一级评论 ${run.stats.topLevel} · 累计回复 ${run.stats.replies} · 命中 ${run.stats.matched} · 待处理 ${run.candidates.length} · 删除 ${run.stats.deleted} · 跳过 ${run.stats.skipped}`;
-    const paginationState = run.pagination?.state;
+    const paginationState = run.pagination?.getSnapshot?.() || run.pagination?.state;
     run.ui.querySelector('[data-pagination]').textContent = paginationState
-      ? `加载轮次 ${paginationState.batchIndex} · 本轮新增 ${paginationState.newIds} · 无新增 ${paginationState.noGrowthAttempts}/${run.pagination.config.noGrowthAttempts}`
+      ? `加载轮次 ${paginationState.batchIndex} · 本轮新增 ${paginationState.newIds} · 无新增 ${paginationState.noGrowthAttempts}/${run.settings?.pagination?.noGrowthAttempts || 0}`
       : '自动加载未启用';
     run.ui.querySelector('[data-wait]').textContent = run.waiting;
     run.ui.querySelector('[data-error]').textContent = run.error || '';
@@ -426,16 +426,25 @@
   function createPaginationLoader() {
     const factory = globalThis.InstagramCommentPaginationLoader;
     if (!factory) return null;
-    return factory.create({
-      settings: run.settings.pagination,
-      getSurface: () => run.stability.surface || discoverCommentSurface() || document,
+    const surfaceFactory = globalThis.InstagramCommentPaginationSurface;
+    const controlsFactory = globalThis.InstagramCommentPaginationControls;
+    const surface = surfaceFactory?.create({
+      getRoot: () => run.stability.surface || discoverCommentSurface() || document,
       getCommentIds: (root) => visibleCommentLinks(root).map((link) => commentIdFromUrl(link.getAttribute('href'))),
+    });
+    const controls = controlsFactory?.create({
+      getRoot: () => surface?.resolveRoot?.() || run.stability.surface || discoverCommentSurface() || document,
+      rootsFor: surface?.rootsFor,
       getControlLabel: controlLabel,
       isLoadMoreControl,
       findLoadingIndicator,
+    });
+    return factory.create({
+      settings: run.settings.pagination,
+      surface,
+      controls,
       isActive: () => !run.stopped && !run.paused,
-      waitForCondition,
-      waitForStableSurface,
+      waiter: { untilStable: waitForStableSurface },
       onProgress: () => draw(),
     });
   }
@@ -555,7 +564,7 @@
     if (run.stopped || run.paused || run.starting) return;
     run.paused = true;
     run.scanGeneration += 1;
-    run.pagination?.cancel('自动加载已暂停。');
+    run.pagination?.cancel('自动加载已暂停。', 'paused');
     cancelStabilityWait(); disconnectStabilityObservers();
     if (run.waitResolve) finishWait(false); else clearTimeout(run.timer);
     run.timer = null; run.state = 'paused'; run.waiting = '已暂停，点击“开始”继续。';
@@ -564,7 +573,7 @@
   async function stop(finalState = 'idle', reason = '') {
     run.stopped = true; run.paused = false;
     run.scanGeneration += 1;
-    run.pagination?.cancel('自动加载已停止。');
+    run.pagination?.cancel('自动加载已停止。', 'cancelled');
     cancelStabilityWait(); disconnectStabilityObservers();
     if (run.waitResolve) finishWait(false); else clearTimeout(run.timer);
     run.timer = null; run.state = finalState; run.waiting = reason || (finalState === 'completed' ? run.waiting : '');
@@ -574,14 +583,15 @@
   async function acquire() { while (!run.stopped && !run.paused) { const result = await send({ type: 'ICC_RATE_ACQUIRE', limits: run.settings.pace.rateLimit }); if (result.ok) return true; if (!Number.isFinite(result.retryAfterMs)) throw new Error(result.reason || '无法申请操作额度。'); if (!(await wait(result.retryAfterMs, `全局操作上限已满，等待 ${Math.ceil(result.retryAfterMs / 1000)} 秒...`))) return false; } return false; }
   async function processPreview() {
     // 阶段一只允许扫描和统计；自动加载完成后再回到 scan()，绝不调用 remove()。
-    if (!run.pagination?.config.enabled) return stop('completed', '预览完成：自动加载未启用，未执行删除。');
+    if (!run.settings?.pagination?.enabled) return stop('completed', '预览完成：自动加载未启用，未执行删除。');
     while (!run.stopped && !run.paused) {
       run.state = 'loading'; run.waiting = '正在准备加载下一批评论...'; draw();
       const batch = await run.pagination.nextBatch();
-      run.stats.batches = run.pagination.state.batchIndex;
+      run.stats.batches = batch.batchIndex;
       run.stats.newComments = batch.newIds || 0;
       if (run.paused || run.stopped) return;
-      if (!batch.ok) return stop('completed', `预览完成：${batch.terminalReason || '当前页面没有更多可加载评论。'}`);
+      if (batch.status === 'paused' || batch.status === 'cancelled') return;
+      if (batch.status === 'completed') return stop('completed', `预览完成：${batch.terminalReason || '当前页面没有更多可加载评论。'}`);
       if (!(await scan())) return;
     }
   }

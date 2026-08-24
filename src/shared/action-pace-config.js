@@ -9,6 +9,8 @@
     maxConsecutive: 20,
     rateLimit: { perMinute: 5, perHour: 60 },
     backoff: { baseSeconds: 30, maxSeconds: 900, jitterRatio: 0.25, maxFailures: 3 },
+    // 自动加载配置集中在共享配置模块，加载器只消费规范化后的值。
+    pagination: { enabled: true, maxBatches: 20, noGrowthAttempts: 3, stableWaitMs: 800, waitTimeoutMs: 8000, allowDeletion: false },
   };
 
   function positive(value, fallback) { return Number(value) > 0 ? Number(value) : fallback; }
@@ -50,10 +52,11 @@
       deleteKeywords: typeof source.deleteKeywords === 'string' ? source.deleteKeywords.trim() : '',
       // 自动加载默认开启；关闭后预览仍只处理当前 DOM，正式删除需另行打开独立安全开关。
       pagination: {
-        enabled: source.pagination ? source.pagination.enabled !== false : true,
-        maxBatches: positive(source.pagination?.maxBatches, 20),
-        noGrowthAttempts: positive(source.pagination?.noGrowthAttempts, 3),
-        stableWaitMs: positive(source.pagination?.stableWaitMs, 800),
+        enabled: source.pagination ? source.pagination.enabled !== false : DEFAULTS.pagination.enabled,
+        maxBatches: positive(source.pagination?.maxBatches, DEFAULTS.pagination.maxBatches),
+        noGrowthAttempts: positive(source.pagination?.noGrowthAttempts, DEFAULTS.pagination.noGrowthAttempts),
+        stableWaitMs: positive(source.pagination?.stableWaitMs, DEFAULTS.pagination.stableWaitMs),
+        waitTimeoutMs: positive(source.pagination?.waitTimeoutMs, DEFAULTS.pagination.waitTimeoutMs),
         allowDeletion: source.pagination?.allowDeletion === true,
       },
       // 使用字符串保存“不限”，避免 Infinity 序列化到 chrome.storage 后变成 null。
