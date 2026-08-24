@@ -452,6 +452,7 @@
           comments = pageComments;
           ids = pageIds;
         }
+        if (!comments.length) throw new Error('未找到当前帖子中已渲染的评论 DOM，请先展开评论后重试。');
         let newIds = 0;
         ids.forEach((id) => { if (!run.seenIds.has(id)) { run.seenIds.add(id); newIds += 1; } });
         const result = InstagramCommentRules.selectCandidates(list, run.rules);
