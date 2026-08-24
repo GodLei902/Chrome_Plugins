@@ -22,8 +22,6 @@
   // Instagram 日文界面在悬停评论后使用“コメントのオプション”，而非通用的“その他”。
   const menuLabel = /(?:^more$|more\s+options?|options?|comment options?|评论(?:的)?选项|选项|更多|その他|オプション|コメント(?:の)?オプション|メニュー|^…$|^\.\.\.$)/i;
   const deleteLabel = /^(?:delete|删除|刪除|削除)(?:\s*(?:comment|コメント))?(?:する)?$/i;
-  // 删除弹层进入到真正点击确认之间，使用现有的随机延迟生成器，控制在 5-20 秒。
-  const deleteDialogDelayConfig = { distribution: 'log-normal', meanSeconds: 10, minSeconds: 5, maxSeconds: 20, variability: 'medium' };
   function finishWait(value) { const resolve = run.waitResolve; run.waitResolve = null; run.waitObserver?.disconnect(); run.waitObserver = null; clearTimeout(run.timer); run.timer = null; run.waiting = ''; draw(); if (resolve) resolve(value); }
   const wait = (ms, why) => new Promise((resolve) => { run.waiting = why; run.waitResolve = resolve; draw(); run.timer = setTimeout(() => finishWait(!run.stopped && !run.paused), ms); });
   function waitForCondition(predicate, timeoutMs, why) {
@@ -260,7 +258,7 @@
     const menuDialog = visibleDeleteDialog();
     const del = deleteButtonInDialog(menuDialog);
     if (!del) throw new Error('没有可靠的删除项，可能缺少权限。');
-    await wait(InstagramCommentDelay.generateDelayMs(deleteDialogDelayConfig), '正在准备点击删除按钮...');
+    await wait(InstagramCommentDelay.generateDelayMs(run.settings.pace.deleteDialogDelay), '正在准备点击删除按钮...');
     del.click();
     if (!(await waitForDeleted(candidate))) throw new Error('未确认回复已删除，已暂停。');
     return true;

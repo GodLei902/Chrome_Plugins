@@ -4,6 +4,7 @@
   const DEFAULTS = {
     operation: { distribution: 'log-normal', meanSeconds: 18, minSeconds: 12, maxSeconds: 30, variability: 'medium' },
     rest: { distribution: 'log-normal', meanSeconds: 180, minSeconds: 120, maxSeconds: 300, variability: 'medium' },
+    deleteDialogDelay: { distribution: 'log-normal', meanSeconds: 20, minSeconds: 10, maxSeconds: 30, variability: 'medium' },
     maxConsecutive: 3,
     rateLimit: { perMinute: 5, perHour: 60 },
     backoff: { baseSeconds: 30, maxSeconds: 900, jitterRatio: 0.25, maxFailures: 3 },
@@ -49,6 +50,7 @@
       sessionMaxMinutes: positive(source.sessionMaxMinutes, 120),
       pace: {
         operation, rest,
+        deleteDialogDelay: normalizeDistribution(pace.deleteDialogDelay, DEFAULTS.deleteDialogDelay),
         maxConsecutive: positive(pace.maxConsecutive, positive(source.batchLimit, DEFAULTS.maxConsecutive)),
         rateLimit: {
           perMinute: positive(pace.rateLimit?.perMinute, DEFAULTS.rateLimit.perMinute),
@@ -69,6 +71,10 @@
       if (item.minSeconds > item.maxSeconds || item.meanSeconds < item.minSeconds || item.meanSeconds > item.maxSeconds) {
         throw new Error('等待时间的最短值、平均值和最长值必须按从小到大填写。');
       }
+    }
+    const deleteDialogDelay = settings.pace.deleteDialogDelay;
+    if (deleteDialogDelay.minSeconds > deleteDialogDelay.maxSeconds || deleteDialogDelay.meanSeconds < deleteDialogDelay.minSeconds || deleteDialogDelay.meanSeconds > deleteDialogDelay.maxSeconds) {
+      throw new Error('点击删除前等待时间的最短值、平均值和最长值必须按从小到大填写。');
     }
     if (settings.pace.backoff.baseSeconds > settings.pace.backoff.maxSeconds) throw new Error('最长重试等待时间不能小于首次重试等待时间。');
     if (settings.sessionLimit !== 'unlimited' && settings.sessionLimit < 1) throw new Error('本次删除上限必须为正数或选择不限。');
