@@ -437,14 +437,29 @@
           if (run.stopped || run.paused) return { ids: new Set(), newIds: 0, expanded, candidates: [] };
           throw new Error(`展开评论后页面未能稳定，已暂停。（容器发现 ${run.stability.discoveryCount} 次，Mutation ${run.stability.mutationVersion} 次，${run.stability.lastSnapshot || '暂无快照'}）`);
         }
-        const list = threads(afterExpand.surface); const ids = replyIds(list); let newIds = 0;
+        let scanSurface = afterExpand.surface;
+        let list = threads(scanSurface);
+        let comments = domComments(scanSurface);
+        let ids = replyIds(list);
+        // 兼容 Instagram 把共同评论容器拆成多个深层节点的版本：
+        // 若当前容器只返回单条评论，回退到整页 DOM 重新建树，避免扫描结果被记为 0。
+        const pageComments = domComments(document);
+        const pageList = threads(document);
+        const pageIds = replyIds(pageList);
+        if (pageComments.length > comments.length || pageIds.size > ids.size) {
+          scanSurface = document;
+          list = pageList;
+          comments = pageComments;
+          ids = pageIds;
+        }
+        let newIds = 0;
         ids.forEach((id) => { if (!run.seenIds.has(id)) { run.seenIds.add(id); newIds += 1; } });
         const result = InstagramCommentRules.selectCandidates(list, run.rules);
         if (scanGeneration !== run.scanGeneration) return { ids: new Set(), newIds: 0, expanded, candidates: [] };
         result.candidates.forEach((candidate) => run.matchedIds.add(candidate.id));
         run.candidates = result.candidates.filter((candidate) => !run.processedIds.has(candidate.id));
-        // 扫描统计只计算当前 DOM 中已渲染的回复；重复预览不会重复累加。
-        run.stats.scanned = ids.size; run.stats.loaded = ids.size; run.stats.matched = run.matchedIds.size;
+        // “扫描”统计当前 DOM 评论总数，“已加载回复”单独统计可进入筛选树的回复数。
+        run.stats.scanned = comments.length; run.stats.loaded = ids.size; run.stats.matched = run.matchedIds.size;
         result.skippedIds.forEach((id) => { if (!run.skippedIds.has(id)) { run.skippedIds.add(id); run.stats.skipped += 1; } });
         run.lastScanIds = ids; run.state = 'idle'; draw();
         run.lastScanResult = { ids, newIds, expanded, candidates: run.candidates, surfaceGeneration: afterExpand.surfaceGeneration };
