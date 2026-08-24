@@ -2,16 +2,28 @@
   'use strict';
   const KEY = 'socialCommentCleanerSettings';
   const TEXT = { idle: '空闲', scanning: '扫描中', running: '运行中', 'cooling-down': '休息中', completed: '已完成', paused: '已暂停', error: '错误' };
-  const run = { stopped: true, paused: false, starting: false, state: 'idle', stats: { scanned: 0, deleted: 0, skipped: 0, loaded: 0 }, candidates: [], timer: null, lockTimer: null, waiting: '', error: '', seenIds: new Set(), skippedIds: new Set(), processedIds: new Set(), lastScanIds: new Set() };
-  const send = (message) => chrome.runtime.sendMessage(message).catch(() => ({ ok: false, reason: '扩展后台不可用。' }));
+  const run = { stopped: true, paused: false, starting: false, state: 'idle', stats: { scanned: 0, matched: 0, deleted: 0, skipped: 0, loaded: 0 }, candidates: [], timer: null, lockTimer: null, waiting: '', error: '', seenIds: new Set(), matchedIds: new Set(), skippedIds: new Set(), processedIds: new Set(), lastScanIds: new Set() };
+  function send(message) {
+    // 扩展热重载后，旧页面脚本仍可能运行在已失效的上下文中；此时
+    // sendMessage 会同步抛错，不能只依赖 Promise.catch 捕获。
+    try {
+      if (typeof chrome === 'undefined' || !chrome.runtime?.id) return Promise.resolve({ ok: false, reason: '扩展上下文已失效，请刷新 Instagram 页面。' });
+      return chrome.runtime.sendMessage(message).catch(() => ({ ok: false, reason: '扩展后台不可用，请刷新 Instagram 页面。' }));
+    } catch {
+      return Promise.resolve({ ok: false, reason: '扩展上下文已失效，请刷新 Instagram 页面。' });
+    }
+  }
   const visible = (node) => { const rect = node.getBoundingClientRect(); return rect.width > 0 && rect.height > 0; };
   const text = (node) => (node.innerText || node.textContent || '').trim();
   const normalizedText = (node) => text(node).replace(/\s+/g, ' ').trim();
   // Instagram 会按界面语言显示折叠入口；只匹配完整短语，避免误点“回复”按钮。
   const replyExpander = /^(?:view|see)\s+(?:all\s+)?(?:\d+\s+)?(?:more\s+)?repl(?:y|ies)|^\d+\s+repl(?:y|ies)\s+(?:to\s+)?view$|^\d+件(?:すべての)?返信を見る$|^返信をすべて見る$|^すべての返信を見る$|^查看(?:全部|所有)?回复$|^查看\s*\d+\s*条回复$/i;
   const hiddenCommentExpander = /^(?:see|view)\s+hidden\s+comments?$|^非表示のコメントを見る$|^非表示.*コメント.*見る$|^查看隐藏评论$|^查看.*隐藏.*评论$/i;
-  const menuLabel = /(?:^more$|more\s+options?|options?|comment options?|评论(?:的)?选项|选项|更多|その他|オプション|メニュー|^…$|^\.\.\.$)/i;
+  // Instagram 日文界面在悬停评论后使用“コメントのオプション”，而非通用的“その他”。
+  const menuLabel = /(?:^more$|more\s+options?|options?|comment options?|评论(?:的)?选项|选项|更多|その他|オプション|コメント(?:の)?オプション|メニュー|^…$|^\.\.\.$)/i;
   const deleteLabel = /^(?:delete|删除|刪除|削除)(?:\s*(?:comment|コメント))?(?:する)?$/i;
+  // 删除弹层进入到真正点击确认之间，使用现有的随机延迟生成器，控制在 5-20 秒。
+  const deleteDialogDelayConfig = { distribution: 'log-normal', meanSeconds: 10, minSeconds: 5, maxSeconds: 20, variability: 'medium' };
   function finishWait(value) { const resolve = run.waitResolve; run.waitResolve = null; run.waitObserver?.disconnect(); run.waitObserver = null; clearTimeout(run.timer); run.timer = null; run.waiting = ''; draw(); if (resolve) resolve(value); }
   const wait = (ms, why) => new Promise((resolve) => { run.waiting = why; run.waitResolve = resolve; draw(); run.timer = setTimeout(() => finishWait(!run.stopped && !run.paused), ms); });
   function waitForCondition(predicate, timeoutMs, why) {
@@ -32,12 +44,36 @@
     });
   }
 
-  function draw() { if (!run.ui) return; run.ui.querySelector('[data-state]').textContent = TEXT[run.state] || run.state; run.ui.querySelector('[data-stats]').textContent = `扫描 ${run.stats.scanned} · 已加载回复 ${run.stats.loaded} · 候选 ${run.candidates.length} · 删除 ${run.stats.deleted} · 跳过 ${run.stats.skipped}`; run.ui.querySelector('[data-wait]').textContent = run.waiting; run.ui.querySelector('[data-error]').textContent = run.error || ''; const active = !run.stopped && !run.paused; const busy = active || run.starting; const start = run.ui.querySelector('[data-start]'); start.textContent = run.paused ? '继续' : '开始'; start.disabled = busy; run.ui.querySelector('[data-preview]').disabled = busy || run.paused; run.ui.querySelector('[data-pause]').disabled = !active; run.ui.querySelector('[data-stop]').disabled = run.stopped; }
+  function draw() { if (!run.ui) return; run.ui.querySelector('[data-state]').textContent = TEXT[run.state] || run.state; run.ui.querySelector('[data-stats]').textContent = `扫描 ${run.stats.scanned} · 已加载回复 ${run.stats.loaded} · 命中 ${run.stats.matched} · 待处理 ${run.candidates.length} · 删除 ${run.stats.deleted} · 跳过 ${run.stats.skipped}`; run.ui.querySelector('[data-wait]').textContent = run.waiting; run.ui.querySelector('[data-error]').textContent = run.error || ''; const active = !run.stopped && !run.paused; const busy = active || run.starting; const start = run.ui.querySelector('[data-start]'); start.textContent = run.paused ? '继续' : '开始'; start.disabled = busy; run.ui.querySelector('[data-preview]').disabled = busy || run.paused; run.ui.querySelector('[data-pause]').disabled = !active; run.ui.querySelector('[data-stop]').disabled = run.stopped; }
   function panel() { if (document.getElementById('icc-host')) return; const host = document.createElement('div'); host.id = 'icc-host'; host.style.cssText = 'position:fixed;right:16px;bottom:16px;z-index:2147483647'; const root = host.attachShadow({ mode: 'open' }); root.innerHTML = `<style>main{font:13px system-ui;color:#111;background:#fff;border:1px solid #d1d5db;border-radius:8px;box-shadow:0 8px 28px #0003;width:320px;padding:14px}h2{font-size:14px;margin:0 0 10px}p{margin:7px 0}.muted{color:#666}.wait{color:#075985;min-height:1em}.error{color:#b42318;min-height:1em}.actions{display:flex;gap:6px;flex-wrap:wrap}button{border:0;border-radius:6px;padding:7px 10px;background:#2563eb;color:#fff}button[data-preview]{background:#0f766e}button[data-pause]{background:#d97706}button[data-stop]{background:#6b7280}button:disabled{opacity:.5}</style><main><h2>社交评论清理器</h2><p>状态：<b data-state>空闲</b></p><p class=muted data-stats></p><p class=wait data-wait></p><p class=error data-error></p><div class=actions><button data-start>开始</button><button data-pause>暂停</button><button data-stop>停止</button><button data-preview>预览模式</button></div></main>`; run.ui = root; document.documentElement.append(host); root.querySelector('[data-start]').onclick = () => start('run'); root.querySelector('[data-preview]').onclick = () => start('preview'); root.querySelector('[data-pause]').onclick = () => pause(); root.querySelector('[data-stop]').onclick = () => stop(); draw(); }
   function dataNodes(value, found = []) { if (!value || typeof value !== 'object') return found; for (const [key, child] of Object.entries(value)) { if (key === '__typename' && child === 'XDTCommentDict') found.push(value); dataNodes(child, found); } return found; }
   // 优先按目标 shortcode 读取媒体 owner，避免把其他推荐媒体作者当成帖子作者。
   function mediaAuthors(value, shortcode, found = []) { if (!value || typeof value !== 'object') return found; const code = String(value.shortcode || value.code || ''); const looksLikeMedia = /media/i.test(String(value.__typename || '')) || Boolean(code && (value.owner?.username || value.user?.username)); if (looksLikeMedia && (value.owner?.username || value.user?.username) && (!shortcode || code === shortcode)) found.push(value.owner?.username || value.user?.username); for (const child of Object.values(value)) mediaAuthors(child, shortcode, found); return found; }
+  function commentIdFromUrl(value) { return String(value || '').match(/\/c\/(\d+)(?:\/|$)/)?.[1] || ''; }
+  function replyUsername(container) {
+    // 个人主页链接同时承载头像和用户名，排除帖子/评论链接后首个即为回复作者。
+    for (const link of container.querySelectorAll('a[href]')) {
+      const match = link.getAttribute('href')?.match(/^\/([^/?#]+)\/?$/);
+      if (match) return decodeURIComponent(match[1]);
+    }
+    return '';
+  }
+  function domReplyComments() {
+    const replies = new Map();
+    for (const timeLink of document.querySelectorAll('a[href*="/c/"]')) {
+      const container = timeLink.closest('ul');
+      const id = commentIdFromUrl(timeLink.getAttribute('href'));
+      if (!container || !id || !visible(container)) continue;
+      const username = replyUsername(container); const body = normalizedText(container);
+      if (!username || !body) continue;
+      // 当前页面版本把已展开回复只渲染到 ul 中，不会同步写回 application/json。
+      // 使用独立虚拟父级可让规则引擎把它稳定地当作回复而非一级评论。
+      replies.set(id, { id, parentId: `dom-reply-parent:${id}`, username, text: body, childCount: 0, element: container });
+    }
+    return [...replies.values()];
+  }
   function locateCommentElement(comment) {
+    if (comment.element?.isConnected && visible(comment.element)) return comment.element;
     const expectedText = String(comment.text || '').replace(/\s+/g, ' ').trim();
     const expectedUsername = String(comment.username || '').toLocaleLowerCase();
     const spans = [...document.querySelectorAll('span')].filter((node) => visible(node) && normalizedText(node) === expectedText);
@@ -57,6 +93,44 @@
     if (replyExpander.test(normalizedText(node)) || hiddenCommentExpander.test(normalizedText(node))) return false;
     return menuLabel.test(label);
   }
+  function visibleDeleteDialog() {
+    // Instagram 新版本会把评论操作和确认删除都渲染成可见 dialog；
+    // 优先锁定 aria-modal 的弹层，再回退到普通 dialog，避免点到页面其他区域。
+    const dialogs = [...document.querySelectorAll('[role="dialog"][aria-modal="true"],[role="dialog"]')].filter(visible);
+    return dialogs.reverse().find((dialog) => [...dialog.querySelectorAll('[role="menuitem"],[role="button"],button')].some((node) => visible(node) && deleteLabel.test(normalizedText(node)))) || null;
+  }
+  function deleteButtonInDialog(dialog) {
+    if (!dialog) return null;
+    return [...dialog.querySelectorAll('[role="menuitem"],[role="button"],button')].find((node) => visible(node) && deleteLabel.test(normalizedText(node))) || null;
+  }
+  function hasRenderedComments() { return [...document.querySelectorAll('a[href*="/c/"]')].some(visible); }
+  function commentMenuFor(element) {
+    // 已加载回复的三点按钮直接挂在其 ul 容器中；不向父级搜索以免命中帖子自身的更多菜单。
+    const controls = [...element.querySelectorAll('button,[role="button"]')].filter(visible);
+    const labelledMenu = controls.find(isCommentMenu);
+    if (labelledMenu) return labelledMenu;
+    // 有些 Instagram A/B 页面不给三点图标提供文字标签。回复行中只有该控件是 24x24
+    // 的非点赞 SVG 按钮，限制在候选行的近层作用域内可避免点到帖子的更多菜单。
+    return controls.find((node) => {
+      const icon = node.querySelector('svg'); const label = `${icon?.getAttribute('aria-label') || ''} ${normalizedText(node)}`;
+      const rect = node.getBoundingClientRect();
+      return icon && !/(?:like|いいね|赞)/i.test(label) && rect.width >= 20 && rect.height >= 20;
+    }) || null;
+  }
+  function revealCommentMenu(element) {
+    // React 的悬停处理会区分 PointerEvent 与 MouseEvent；指针事件优先使用原生类型，
+    // 保证三点按钮在无需用户手动移动鼠标时也能挂载到回复行中。
+    const pointerEvent = typeof PointerEvent === 'function' ? PointerEvent : MouseEvent;
+    element.dispatchEvent(new pointerEvent('pointerover', { bubbles: true }));
+    ['mouseover', 'mousemove'].forEach((type) => element.dispatchEvent(new MouseEvent(type, { bubbles: true })));
+  }
+  async function hoverCommentWithBrowserPointer(element) {
+    const rect = element.getBoundingClientRect();
+    const x = Math.round(rect.left + Math.min(Math.max(rect.width * 0.55, 16), Math.max(rect.width - 16, 16)));
+    const y = Math.round(rect.top + Math.min(Math.max(rect.height * 0.5, 12), Math.max(rect.height - 12, 12)));
+    const result = await send({ type: 'ICC_HOVER_COMMENT', x, y });
+    if (!result.ok) throw new Error(result.reason || '无法显示评论菜单。');
+  }
   async function revealCollapsedComments() {
     const clicked = new WeakSet();
     let count = 0;
@@ -70,8 +144,10 @@
       clicked.add(control);
       control.click();
       count += 1;
-      // Windows/日文界面下展开动作通常伴随一次网络请求，留出足够时间让 JSON 和 DOM 同步。
-      if (!(await wait(900, '正在展开折叠的回复和非表示评论...'))) return count;
+      // 展开操作会触发网络请求。等待原控制项消失或变为“隐藏回复”，避免仅等固定时间
+      // 就在回复尚未渲染时开始下一轮扫描。
+      const expanded = await waitForCondition(() => !control.isConnected || !visible(control) || !(replyExpander.test(normalizedText(control)) || hiddenCommentExpander.test(normalizedText(control))), 5000, '正在展开折叠的回复和非表示评论...');
+      if (!expanded && (run.stopped || run.paused)) return count;
     }
     return count;
   }
@@ -86,6 +162,11 @@
         if (id && node.user?.username && node.text) source.set(id, { id, parentId: node.parent_comment_id == null ? '' : String(node.parent_comment_id), username: node.user.username, text: node.text, childCount: Number(node.child_comment_count) || 0 });
       }
     } catch { /* Ignore unrelated JSON. */ }
+    for (const reply of domReplyComments()) {
+      // 结构化数据可用时优先保留其父级关系，只补充 DOM 节点供删除时定位菜单。
+      const structured = source.get(reply.id);
+      source.set(reply.id, structured ? { ...structured, element: reply.element } : reply);
+    }
     const authorUsername = authors.values().next().value || (allAuthors.size === 1 ? allAuthors.values().next().value : '');
     // 扫描阶段只使用结构化数据；DOM 节点可能尚未渲染，删除时再按候选重新定位。
     const mapped = [...source.values()].map((comment) => ({ ...comment, isPostAuthor: Boolean(authorUsername) && InstagramCommentRules.normalizeUsername(comment.username) === InstagramCommentRules.normalizeUsername(authorUsername) }));
@@ -113,12 +194,16 @@
   async function scan() {
     run.state = 'scanning'; draw();
     if (/(challenge_required|try again later|验证|verification|rate limit)/i.test(document.body.innerText)) throw new Error('检测到验证、限流或异常页面，已暂停。');
+    // 从扩展按钮启动新页面时，document_idle 早于评论数据渲染；先等待稳定评论链接出现。
+    if (!hasRenderedComments()) await waitForCondition(hasRenderedComments, 12000, '正在等待 Instagram 加载评论...');
+    if (run.stopped || run.paused) return { ids: new Set(), newIds: 0, expanded: 0 };
     const expanded = await revealCollapsedComments(); if (run.stopped || run.paused) return { ids: new Set(), newIds: 0, expanded };
     const list = threads(); const ids = replyIds(list); let newIds = 0;
     ids.forEach((id) => { if (!run.seenIds.has(id)) { run.seenIds.add(id); newIds += 1; } });
     const result = InstagramCommentRules.selectCandidates(list, run.rules);
+    result.candidates.forEach((candidate) => run.matchedIds.add(candidate.id));
     run.candidates = result.candidates.filter((candidate) => !run.processedIds.has(candidate.id));
-    run.stats.scanned += newIds; run.stats.loaded = run.seenIds.size;
+    run.stats.scanned += newIds; run.stats.loaded = run.seenIds.size; run.stats.matched = run.matchedIds.size;
     result.skippedIds.forEach((id) => { if (!run.skippedIds.has(id)) { run.skippedIds.add(id); run.stats.skipped += 1; } });
     run.lastScanIds = ids; run.state = 'idle'; draw();
     return { ids, newIds, expanded };
@@ -161,22 +246,22 @@
     candidate.element = locateCommentElement(candidate);
     if (!candidate.element?.isConnected) throw new Error('目标回复尚未渲染到页面，正在重新扫描。');
     candidate.element.scrollIntoView({ block: 'center', behavior: 'auto' });
-    ['pointerover', 'mouseover', 'mousemove'].forEach((type) => candidate.element.dispatchEvent(new MouseEvent(type, { bubbles: true })));
+    revealCommentMenu(candidate.element);
+    // 伪造 DOM 事件无法触发 Instagram 的 CSS :hover，使用当前标签页的原生指针事件补足。
+    await hoverCommentWithBrowserPointer(candidate.element);
     candidate.element.focus?.();
-    const scopes = []; for (let node = candidate.element, depth = 0; node && depth < 6; node = node.parentElement, depth += 1) scopes.push(node);
-    const more = scopes.flatMap((scope) => [...scope.querySelectorAll('button,[role="button"]')]).find((node) => visible(node) && isCommentMenu(node));
-    if (!more) throw new Error('未找到可靠的评论菜单，已暂停。');
+    // 悬停后 Instagram 会异步挂载“评论选项”按钮，不能在同一事件循环内立即查询。
+    const commentMenuReady = await waitForCondition(() => Boolean(commentMenuFor(candidate.element)), 1800, '正在显示评论菜单...');
+    const more = commentMenuFor(candidate.element);
+    if (!commentMenuReady || !more) throw new Error('未找到可靠的评论菜单，已暂停。');
     more.focus?.(); more.click();
-    const menuReady = await waitForCondition(() => [...document.querySelectorAll('[role="menu"],[role="menuitem"]')].some(visible), 5000, '正在等待删除菜单...');
+    const menuReady = await waitForCondition(() => Boolean(visibleDeleteDialog()), 5000, '正在打开删除菜单...');
     if (!menuReady) throw new Error('删除菜单未出现，已暂停。');
-    const del = [...document.querySelectorAll('[role="menuitem"],[role="button"],button')].find((node) => visible(node) && deleteLabel.test(normalizedText(node)));
+    const menuDialog = visibleDeleteDialog();
+    const del = deleteButtonInDialog(menuDialog);
     if (!del) throw new Error('没有可靠的删除项，可能缺少权限。');
+    await wait(InstagramCommentDelay.generateDelayMs(deleteDialogDelayConfig), '正在准备点击删除按钮...');
     del.click();
-    const dialogReady = await waitForCondition(() => [...document.querySelectorAll('[role="dialog"]')].some(visible), 5000, '正在等待删除确认...');
-    if (!dialogReady) throw new Error('删除确认框未出现，已暂停。');
-    const confirm = [...document.querySelectorAll('[role="dialog"] button,[role="dialog"] [role="button"]')].find((node) => visible(node) && deleteLabel.test(normalizedText(node)));
-    if (!confirm) throw new Error('未找到删除确认按钮，已暂停。');
-    confirm.click();
     if (!(await waitForDeleted(candidate))) throw new Error('未确认回复已删除，已暂停。');
     return true;
   }
@@ -210,6 +295,8 @@
           first = false; if (!(await acquire())) return;
           run.state = 'running'; draw();
           await remove(candidate); run.processedIds.add(candidate.id); run.stats.deleted += 1;
+          // 删除 mutation 会短暂卸载整个回复列表；等页面重绘后再扫描，防止漏掉下一条候选。
+          if (!(await wait(1300, '正在等待 Instagram 更新评论区...'))) return;
           const state = run.pace.success(); await scan();
           if (state === 'REST') { run.state = 'cooling-down'; draw(); if (!(await wait(InstagramCommentDelay.generateDelayMs(run.settings.pace.rest), '连续处理达到上限，正在休息...'))) return; run.pace.restComplete(); first = true; await scan(); }
         } catch (error) {
@@ -243,7 +330,7 @@
       if (InstagramCommentRules.normalizeTargetUrl(location.href) !== run.rules.targetUrl) throw new Error('当前 URL 与设置的目标帖子不匹配。');
       const lock = await send({ type: 'ICC_ACQUIRE_LOCK', targetUrl: run.rules.targetUrl }); if (!lock.ok) throw new Error(lock.reason);
       if (!resuming) {
-        run.stopped = false; run.mode = mode; run.startedAt = Date.now(); run.seenIds = new Set(); run.skippedIds = new Set(); run.processedIds = new Set(); run.lastScanIds = new Set(); run.stats = { scanned: 0, deleted: 0, skipped: 0, loaded: 0 }; run.pace = new InstagramCommentPaceController(run.settings.pace);
+        run.stopped = false; run.mode = mode; run.startedAt = Date.now(); run.seenIds = new Set(); run.matchedIds = new Set(); run.skippedIds = new Set(); run.processedIds = new Set(); run.lastScanIds = new Set(); run.stats = { scanned: 0, matched: 0, deleted: 0, skipped: 0, loaded: 0 }; run.pace = new InstagramCommentPaceController(run.settings.pace);
       } else {
         run.paused = false; run.error = ''; run.waiting = ''; run.state = 'idle';
         if (run.pace?.state === 'REST') run.pace.restComplete();
