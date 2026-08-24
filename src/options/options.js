@@ -11,6 +11,10 @@ async function save(requireTarget = false) { const settings = validate(requireTa
 let saveTimer;
 function scheduleSave() { clearTimeout(saveTimer); saveTimer = setTimeout(() => save(false).catch((error) => { status.textContent = error.message || '自动保存失败'; }), 350); }
 async function launch(mode) { try { status.textContent = '准备开始...'; const settings = await save(true); const response = await chrome.runtime.sendMessage({ type: 'ICC_LAUNCH', targetUrl: settings.targetPostUrl, mode }); if (!response?.ok) throw new Error(response?.reason || '启动失败'); status.textContent = mode === 'preview' ? '预览已开始' : '已开始'; } catch (error) { status.textContent = error.message || '启动失败'; } }
+// 暂停和停止只控制已经打开的目标帖子，不会重新导航或启动新任务。
+async function control(action) { try { const settings = await save(true); const response = await chrome.runtime.sendMessage({ type: action === 'pause' ? 'ICC_PAUSE' : 'ICC_STOP', targetUrl: settings.targetPostUrl }); if (!response?.ok) throw new Error(response?.reason || `${action === 'pause' ? '暂停' : '停止'}失败`); status.textContent = action === 'pause' ? '已暂停' : '已停止'; } catch (error) { status.textContent = error.message || `${action === 'pause' ? '暂停' : '停止'}失败`; } }
 document.addEventListener('DOMContentLoaded', async () => { const stored = (await chrome.storage.sync.get(STORAGE_KEY))[STORAGE_KEY]; render(InstagramCommentPaceConfig.normalizeSettings(stored)); form.querySelectorAll('input,textarea,select').forEach((node) => node.addEventListener('input', scheduleSave)); });
 form.addEventListener('submit', (event) => { event.preventDefault(); launch('run'); });
 input('previewButton').addEventListener('click', () => launch('preview'));
+input('pauseButton').addEventListener('click', () => control('pause'));
+input('stopButton').addEventListener('click', () => control('stop'));

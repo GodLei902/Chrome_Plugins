@@ -52,6 +52,14 @@ async function launchOnTargetTab(targetUrl, mode) {
   return { ok: false, reason: '当前页面尚未加载清理器，请等待页面完成加载后重试。' };
 }
 
+async function controlTargetTab(targetUrl, type) {
+  const tabs = await chrome.tabs.query({});
+  const tab = tabs.find((candidate) => normalizeTargetUrl(candidate.url || '') === targetUrl);
+  if (!tab?.id) return { ok: false, reason: '尚未找到已打开的目标帖子，请先点击“开始”。' };
+  const response = await chrome.tabs.sendMessage(tab.id, { type }).catch(() => null);
+  return response?.ok ? response : { ok: false, reason: '目标页面尚未加载清理器，请等待页面完成加载后重试。' };
+}
+
 chrome.runtime.onInstalled.addListener(() => {
   console.info('[社交评论清理器] installed');
 });
@@ -62,6 +70,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const targetUrl = normalizeTargetUrl(message.targetUrl);
       if (!targetUrl) return sendResponse({ ok: false, reason: '目标 URL 无效。' });
       return sendResponse(await launchOnTargetTab(targetUrl, message.mode));
+    })().catch((error) => sendResponse({ ok: false, reason: error.message }));
+    return true;
+  }
+  if (['ICC_PAUSE', 'ICC_STOP'].includes(message?.type)) {
+    (async () => {
+      const targetUrl = normalizeTargetUrl(message.targetUrl);
+      if (!targetUrl) return sendResponse({ ok: false, reason: '目标 URL 无效。' });
+      return sendResponse(await controlTargetTab(targetUrl, message.type));
     })().catch((error) => sendResponse({ ok: false, reason: error.message }));
     return true;
   }

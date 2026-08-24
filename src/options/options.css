@@ -104,6 +104,7 @@ legend { padding: 0 6px; font-weight: 600; }
 .actions {
   display: flex;
   gap: 12px;
+  flex-wrap: wrap;
 }
 
 .actions button {
@@ -124,6 +125,9 @@ legend { padding: 0 6px; font-weight: 600; }
   min-width: 150px;
   background: #0f766e;
 }
+
+.actions button.pause { background: #d97706; }
+.actions button.stop { background: #6b7280; }
 
 .status {
   min-height: 1.2em;

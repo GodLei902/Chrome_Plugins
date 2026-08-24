@@ -233,6 +233,11 @@
       run.paused = true; run.state = 'paused'; run.error = error.message; await releaseLock(); draw();
     }
   }
-  chrome.runtime.onMessage.addListener((message, sender, reply) => { if (!['ICC_START', 'ICC_PREVIEW'].includes(message?.type)) return false; start(message.type === 'ICC_START' ? 'run' : 'preview'); reply({ ok: true }); return false; });
+  chrome.runtime.onMessage.addListener((message, sender, reply) => {
+    if (message?.type === 'ICC_PAUSE') { pause(); reply({ ok: true }); return false; }
+    if (message?.type === 'ICC_STOP') { stop(); reply({ ok: true }); return false; }
+    if (!['ICC_START', 'ICC_PREVIEW'].includes(message?.type)) return false;
+    start(message.type === 'ICC_START' ? 'run' : 'preview'); reply({ ok: true }); return false;
+  });
   if (InstagramCommentRules.normalizeTargetUrl(location.href)) panel();
 })();
