@@ -2,7 +2,7 @@
   'use strict';
   const KEY = 'socialCommentCleanerSettings';
   const TEXT = { idle: '空闲', scanning: '扫描中', running: '运行中', 'cooling-down': '休息中', loading: '滚动加载中', completed: '已完成', paused: '已暂停', error: '错误' };
-  const run = { stopped: true, paused: false, starting: false, state: 'idle', stats: { scanned: 0, deleted: 0, skipped: 0, loaded: 0, scrollRounds: 0, emptyRounds: 0 }, candidates: [], timer: null, lockTimer: null, waiting: '', error: '', seenIds: new Set(), skippedIds: new Set(), processedIds: new Set(), lastScanIds: new Set(), confirmed: false };
+  const run = { stopped: true, paused: false, starting: false, state: 'idle', stats: { scanned: 0, deleted: 0, skipped: 0, loaded: 0, scrollRounds: 0, emptyRounds: 0 }, candidates: [], timer: null, lockTimer: null, waiting: '', error: '', seenIds: new Set(), skippedIds: new Set(), processedIds: new Set(), lastScanIds: new Set() };
   const send = (message) => chrome.runtime.sendMessage(message).catch(() => ({ ok: false, reason: '扩展后台不可用。' }));
   const visible = (node) => { const rect = node.getBoundingClientRect(); return rect.width > 0 && rect.height > 0; };
   const text = (node) => (node.innerText || node.textContent || '').trim();
@@ -186,7 +186,7 @@
     run.stopped = true; run.paused = false;
     if (run.waitResolve) finishWait(false); else clearTimeout(run.timer);
     run.timer = null; run.state = finalState; run.waiting = reason || (finalState === 'completed' ? run.waiting : '');
-    run.candidates = []; run.confirmed = false;
+    run.candidates = [];
     await releaseLock(); draw();
   }
   async function acquire() { while (!run.stopped && !run.paused) { const result = await send({ type: 'ICC_RATE_ACQUIRE', limits: run.settings.pace.rateLimit }); if (result.ok) return true; if (!Number.isFinite(result.retryAfterMs)) throw new Error(result.reason || '无法申请操作额度。'); if (!(await wait(result.retryAfterMs, `全局操作上限已满，等待 ${Math.ceil(result.retryAfterMs / 1000)} 秒...`))) return false; } return false; }
@@ -197,7 +197,6 @@
       if (run.settings.sessionMaxMinutes && Date.now() - run.startedAt >= run.settings.sessionMaxMinutes * 60000) return stop('paused', '已达到本次任务运行时间上限。');
       if (run.settings.sessionLimit !== 'unlimited' && run.stats.deleted >= run.settings.sessionLimit) return stop('paused', '已达到本次任务删除数量上限。');
       if (run.candidates.length) {
-        if (!run.confirmed) { run.confirmed = true; if (!window.confirm(`本次将持续处理命中的子级回复，当前已找到 ${run.candidates.length} 条候选，确认开始吗？`)) return stop(); }
         const candidate = run.candidates.shift();
         if (run.processedIds.has(candidate.id)) continue;
         try {
@@ -224,10 +223,15 @@
     run.starting = true; draw();
     try {
       run.settings = InstagramCommentPaceConfig.validateSettings((await chrome.storage.sync.get(KEY))[KEY] || {}); run.rules = InstagramCommentRules.prepareRules(run.settings);
+      // Instagram 完成导航后可能还会短暂替换地址（例如重定向或 SPA 路由更新）。
+      // 启动消息只发送一次，因此在校验前等待目标 URL 稳定，避免用户再次点击页面内“开始”。
+      for (let attempt = 0; attempt < 20 && InstagramCommentRules.normalizeTargetUrl(location.href) !== run.rules.targetUrl; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 300));
+      }
       if (InstagramCommentRules.normalizeTargetUrl(location.href) !== run.rules.targetUrl) throw new Error('当前 URL 与设置的目标帖子不匹配。');
       const lock = await send({ type: 'ICC_ACQUIRE_LOCK', targetUrl: run.rules.targetUrl }); if (!lock.ok) throw new Error(lock.reason);
       if (!resuming) {
-        run.stopped = false; run.mode = mode; run.startedAt = Date.now(); run.confirmed = false; run.seenIds = new Set(); run.skippedIds = new Set(); run.processedIds = new Set(); run.lastScanIds = new Set(); run.stats = { scanned: 0, deleted: 0, skipped: 0, loaded: 0, scrollRounds: 0, emptyRounds: 0 }; run.pace = new InstagramCommentPaceController(run.settings.pace);
+        run.stopped = false; run.mode = mode; run.startedAt = Date.now(); run.seenIds = new Set(); run.skippedIds = new Set(); run.processedIds = new Set(); run.lastScanIds = new Set(); run.stats = { scanned: 0, deleted: 0, skipped: 0, loaded: 0, scrollRounds: 0, emptyRounds: 0 }; run.pace = new InstagramCommentPaceController(run.settings.pace);
       } else {
         run.paused = false; run.error = ''; run.waiting = ''; run.state = 'idle';
         if (run.pace?.state === 'REST') run.pace.restComplete();
