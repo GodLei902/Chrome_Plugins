@@ -1,9 +1,9 @@
 (function () {
   'use strict';
   const KEY = 'socialCommentCleanerSettings';
-  const TEXT = { idle: '空闲', 'waiting-surface': '等待评论区', expanding: '展开中', stabilizing: '等待稳定', scanning: '扫描中', running: '运行中', 'waiting-delete': '确认删除', 'cooling-down': '休息中', completed: '已完成', paused: '已暂停', error: '错误' };
+  const TEXT = { idle: '空闲', 'waiting-surface': '等待评论区', expanding: '展开中', stabilizing: '等待稳定', scanning: '扫描中', loading: '加载下一批', 'waiting-load': '等待下一批', running: '运行中', 'waiting-delete': '确认删除', 'cooling-down': '休息中', completed: '已完成', paused: '已暂停', error: '错误' };
   const stabilityDefaults = globalThis.InstagramCommentSurfaceStability?.DEFAULTS || { mutationDebounceMs: 250, rafConfirmCount: 2, stablePasses: 2, initialReadyTimeoutMs: 15000, postDeleteSettleTimeoutMs: 10000, emptyRescanAttempts: 3 };
-  const run = { stopped: true, paused: false, starting: false, state: 'idle', stats: { scanned: 0, matched: 0, deleted: 0, skipped: 0, loaded: 0 }, candidates: [], timer: null, lockTimer: null, waiting: '', error: '', seenIds: new Set(), matchedIds: new Set(), skippedIds: new Set(), processedIds: new Set(), lastScanIds: new Set(), scanInFlight: false, scanGeneration: 0, stability: { surface: null, surfaceGeneration: 0, mutationVersion: 0, lastMutationAt: 0, observer: null, discoveryObserver: null, pending: new Set(), discoveryCount: 0, stage: '', lastSnapshot: '' } };
+  const run = { stopped: true, paused: false, starting: false, mode: 'preview', state: 'idle', stats: { scanned: 0, matched: 0, deleted: 0, skipped: 0, loaded: 0, discovered: 0, topLevel: 0, replies: 0, batches: 0, newComments: 0 }, candidates: [], timer: null, lockTimer: null, waiting: '', error: '', seenIds: new Set(), seenCommentIds: new Set(), seenReplyIds: new Set(), matchedIds: new Set(), skippedIds: new Set(), processedIds: new Set(), lastScanIds: new Set(), scanInFlight: false, scanGeneration: 0, pagination: null, stability: { surface: null, surfaceGeneration: 0, mutationVersion: 0, lastMutationAt: 0, observer: null, discoveryObserver: null, pending: new Set(), discoveryCount: 0, stage: '', lastSnapshot: '' } };
   function send(message) {
     // 扩展热重载后，旧页面脚本仍可能运行在已失效的上下文中；此时
     // sendMessage 会同步抛错，不能只依赖 Promise.catch 捕获。
@@ -23,17 +23,22 @@
   // 作品详情页的评论列表还会使用“加载/查看更多评论或回复”分页入口；
   // 这些入口有时只有 SVG 的 aria-label/title，没有可读的按钮文本。
   const loadMoreExpander = /^(?:load|view|see)\s+(?:more|all)\s+(?:comments?|repl(?:y|ies))$|^(?:加载更多|查看更多|查看全部)(?:评论|回复)$|^(?:コメント|返信)を(?:さらに|もっと)(?:読み込む|見る)$|^(?:コメント|返信)をすべて見る$/i;
-  function controlLabel(node) {
-    if (!node) return '';
+  function controlLabels(node) {
+    if (!node) return [];
     const labels = [normalizedText(node), node.getAttribute?.('aria-label'), node.getAttribute?.('title')];
     node.querySelectorAll?.('[aria-label],[title]').forEach((child) => {
       labels.push(child.getAttribute('aria-label'), child.getAttribute('title'));
     });
-    return [...new Set(labels.map((value) => String(value || '').replace(/\s+/g, ' ').trim()).filter(Boolean))].join(' ');
+    return [...new Set(labels.map((value) => String(value || '').replace(/\s+/g, ' ').trim()).filter(Boolean))];
   }
+  function controlLabel(node) { return controlLabels(node).join(' '); }
   function isCommentExpansionControl(node) {
-    const label = controlLabel(node);
-    return replyExpander.test(label) || hiddenCommentExpander.test(label) || loadMoreExpander.test(label);
+    return controlLabels(node).some((label) => replyExpander.test(label) || hiddenCommentExpander.test(label) || loadMoreExpander.test(label));
+  }
+  function isLoadMoreControl(node) { return controlLabels(node).some((label) => loadMoreExpander.test(label)); }
+  function findLoadingIndicator(root = document) {
+    const nodes = root?.querySelectorAll ? [...root.querySelectorAll('[role="progressbar"],[aria-busy="true"]')] : [];
+    return nodes.some(visible);
   }
   // Instagram 日文界面在悬停评论后使用“コメントのオプション”，而非通用的“その他”。
   const menuLabel = /(?:^more$|more\s+options?|options?|comment options?|评论(?:的)?选项|选项|更多|その他|オプション|コメント(?:の)?オプション|メニュー|^…$|^\.\.\.$)/i;
@@ -63,14 +68,18 @@
   function draw() {
     if (!run.ui) return;
     run.ui.querySelector('[data-state]').textContent = TEXT[run.state] || run.state;
-    run.ui.querySelector('[data-stats]').textContent = `扫描 ${run.stats.scanned} · 已加载回复 ${run.stats.loaded} · 命中 ${run.stats.matched} · 待处理 ${run.candidates.length} · 删除 ${run.stats.deleted} · 跳过 ${run.stats.skipped}`;
+    run.ui.querySelector('[data-stats]').textContent = `累计一级评论 ${run.stats.topLevel} · 累计回复 ${run.stats.replies} · 命中 ${run.stats.matched} · 待处理 ${run.candidates.length} · 删除 ${run.stats.deleted} · 跳过 ${run.stats.skipped}`;
+    const paginationState = run.pagination?.state;
+    run.ui.querySelector('[data-pagination]').textContent = paginationState
+      ? `加载轮次 ${paginationState.batchIndex} · 本轮新增 ${paginationState.newIds} · 无新增 ${paginationState.noGrowthAttempts}/${run.pagination.config.noGrowthAttempts}`
+      : '自动加载未启用';
     run.ui.querySelector('[data-wait]').textContent = run.waiting;
     run.ui.querySelector('[data-error]').textContent = run.error || '';
     const active = !run.stopped && !run.paused; const busy = active || run.starting;
     const start = run.ui.querySelector('[data-start]'); start.textContent = run.paused ? '继续' : '开始'; start.disabled = busy;
     run.ui.querySelector('[data-preview]').disabled = busy || run.paused; run.ui.querySelector('[data-pause]').disabled = !active; run.ui.querySelector('[data-stop]').disabled = run.stopped;
   }
-  function panel() { if (document.getElementById('icc-host')) return; const host = document.createElement('div'); host.id = 'icc-host'; host.style.cssText = 'position:fixed;right:16px;bottom:16px;z-index:2147483647'; const root = host.attachShadow({ mode: 'open' }); root.innerHTML = `<style>main{font:13px system-ui;color:#111;background:#fff;border:1px solid #d1d5db;border-radius:8px;box-shadow:0 8px 28px #0003;width:320px;padding:14px}h2{font-size:14px;margin:0 0 10px}p{margin:7px 0}.muted{color:#666}.wait{color:#075985;min-height:1em}.error{color:#b42318;min-height:1em}.actions{display:flex;gap:6px;flex-wrap:wrap}button{border:0;border-radius:6px;padding:7px 10px;background:#2563eb;color:#fff}button[data-preview]{background:#0f766e}button[data-pause]{background:#d97706}button[data-stop]{background:#6b7280}button:disabled{opacity:.5}</style><main><h2>社交评论清理器</h2><p>状态：<b data-state>空闲</b></p><p class=muted data-stats></p><p class=wait data-wait></p><p class=error data-error></p><div class=actions><button data-start>开始</button><button data-pause>暂停</button><button data-stop>停止</button><button data-preview>预览模式</button></div></main>`; run.ui = root; document.documentElement.append(host); root.querySelector('[data-start]').onclick = () => start('run'); root.querySelector('[data-preview]').onclick = () => start('preview'); root.querySelector('[data-pause]').onclick = () => pause(); root.querySelector('[data-stop]').onclick = () => stop(); draw(); }
+  function panel() { if (document.getElementById('icc-host')) return; const host = document.createElement('div'); host.id = 'icc-host'; host.style.cssText = 'position:fixed;right:16px;bottom:16px;z-index:2147483647'; const root = host.attachShadow({ mode: 'open' }); root.innerHTML = `<style>main{font:13px system-ui;color:#111;background:#fff;border:1px solid #d1d5db;border-radius:8px;box-shadow:0 8px 28px #0003;width:340px;padding:14px}h2{font-size:14px;margin:0 0 10px}p{margin:7px 0}.muted{color:#666}.wait{color:#075985;min-height:1em}.pagination{color:#075985;min-height:1em}.error{color:#b42318;min-height:1em}.actions{display:flex;gap:6px;flex-wrap:wrap}button{border:0;border-radius:6px;padding:7px 10px;background:#2563eb;color:#fff}button[data-preview]{background:#0f766e}button[data-pause]{background:#d97706}button[data-stop]{background:#6b7280}button:disabled{opacity:.5}</style><main><h2>社交评论清理器</h2><p>状态：<b data-state>空闲</b></p><p class=muted data-stats></p><p class=pagination data-pagination></p><p class=wait data-wait></p><p class=error data-error></p><div class=actions><button data-start>开始</button><button data-pause>暂停</button><button data-stop>停止</button><button data-preview>预览模式</button></div></main>`; run.ui = root; document.documentElement.append(host); root.querySelector('[data-start]').onclick = () => start('run'); root.querySelector('[data-preview]').onclick = () => start('preview'); root.querySelector('[data-pause]').onclick = () => pause(); root.querySelector('[data-stop]').onclick = () => stop(); draw(); }
   function commentIdFromUrl(value) { return String(value || '').match(/\/c\/(\d+)(?:\/|$)/)?.[1] || ''; }
   function replyUsername(container) {
     // 个人主页链接同时承载头像和用户名，排除帖子/评论链接后首个即为回复作者。
@@ -414,6 +423,22 @@
     // DOM 是唯一数据源；这里等待展开后的评论节点完成重绘，避免读取中间态。
     return waitForStableSurface({ timeoutMs: stabilityDefaults.initialReadyTimeoutMs, requireData: false, reason: '正在等待展开后的评论区稳定...' });
   }
+  function createPaginationLoader() {
+    const factory = globalThis.InstagramCommentPaginationLoader;
+    if (!factory) return null;
+    return factory.create({
+      settings: run.settings.pagination,
+      getSurface: () => run.stability.surface || discoverCommentSurface() || document,
+      getCommentIds: (root) => visibleCommentLinks(root).map((link) => commentIdFromUrl(link.getAttribute('href'))),
+      getControlLabel: controlLabel,
+      isLoadMoreControl,
+      findLoadingIndicator,
+      isActive: () => !run.stopped && !run.paused,
+      waitForCondition,
+      waitForStableSurface,
+      onProgress: () => draw(),
+    });
+  }
   async function scan() {
     if (run.scanInFlight) return run.scanPromise;
     run.scanInFlight = true;
@@ -453,16 +478,25 @@
           ids = pageIds;
         }
         if (!comments.length) throw new Error('未找到当前帖子中已渲染的评论 DOM，请先展开评论后重试。');
+        const commentIdSet = new Set(comments.map((comment) => String(comment.id || '')).filter(Boolean));
+        const replyIdSet = new Set(ids);
         let newIds = 0;
-        ids.forEach((id) => { if (!run.seenIds.has(id)) { run.seenIds.add(id); newIds += 1; } });
+        replyIdSet.forEach((id) => { if (!run.seenIds.has(id)) { run.seenIds.add(id); newIds += 1; } });
+        commentIdSet.forEach((id) => run.seenCommentIds.add(id));
+        replyIdSet.forEach((id) => run.seenReplyIds.add(id));
         const result = InstagramCommentRules.selectCandidates(list, run.rules);
         if (scanGeneration !== run.scanGeneration) return { ids: new Set(), newIds: 0, expanded, candidates: [] };
         result.candidates.forEach((candidate) => run.matchedIds.add(candidate.id));
         run.candidates = result.candidates.filter((candidate) => !run.processedIds.has(candidate.id));
         // “扫描”统计当前 DOM 评论总数，“已加载回复”单独统计可进入筛选树的回复数。
-        run.stats.scanned = comments.length; run.stats.loaded = ids.size; run.stats.matched = run.matchedIds.size;
+        run.stats.scanned = comments.length;
+        run.stats.loaded = run.seenReplyIds.size;
+        run.stats.topLevel = [...run.seenCommentIds].filter((id) => !run.seenReplyIds.has(id)).length;
+        run.stats.replies = run.seenReplyIds.size;
+        run.stats.discovered = run.seenCommentIds.size;
+        run.stats.matched = run.matchedIds.size;
         result.skippedIds.forEach((id) => { if (!run.skippedIds.has(id)) { run.skippedIds.add(id); run.stats.skipped += 1; } });
-        run.lastScanIds = ids; run.state = 'idle'; draw();
+        run.lastScanIds = replyIdSet; run.state = 'idle'; draw();
         run.lastScanResult = { ids, newIds, expanded, candidates: run.candidates, surfaceGeneration: afterExpand.surfaceGeneration };
         return run.lastScanResult;
       } finally { run.scanInFlight = false; run.scanPromise = null; }
@@ -521,6 +555,7 @@
     if (run.stopped || run.paused || run.starting) return;
     run.paused = true;
     run.scanGeneration += 1;
+    run.pagination?.cancel('自动加载已暂停。');
     cancelStabilityWait(); disconnectStabilityObservers();
     if (run.waitResolve) finishWait(false); else clearTimeout(run.timer);
     run.timer = null; run.state = 'paused'; run.waiting = '已暂停，点击“开始”继续。';
@@ -529,6 +564,7 @@
   async function stop(finalState = 'idle', reason = '') {
     run.stopped = true; run.paused = false;
     run.scanGeneration += 1;
+    run.pagination?.cancel('自动加载已停止。');
     cancelStabilityWait(); disconnectStabilityObservers();
     if (run.waitResolve) finishWait(false); else clearTimeout(run.timer);
     run.timer = null; run.state = finalState; run.waiting = reason || (finalState === 'completed' ? run.waiting : '');
@@ -536,8 +572,22 @@
     await releaseLock(); draw();
   }
   async function acquire() { while (!run.stopped && !run.paused) { const result = await send({ type: 'ICC_RATE_ACQUIRE', limits: run.settings.pace.rateLimit }); if (result.ok) return true; if (!Number.isFinite(result.retryAfterMs)) throw new Error(result.reason || '无法申请操作额度。'); if (!(await wait(result.retryAfterMs, `全局操作上限已满，等待 ${Math.ceil(result.retryAfterMs / 1000)} 秒...`))) return false; } return false; }
+  async function processPreview() {
+    // 阶段一只允许扫描和统计；自动加载完成后再回到 scan()，绝不调用 remove()。
+    if (!run.pagination?.config.enabled) return stop('completed', '预览完成：自动加载未启用，未执行删除。');
+    while (!run.stopped && !run.paused) {
+      run.state = 'loading'; run.waiting = '正在准备加载下一批评论...'; draw();
+      const batch = await run.pagination.nextBatch();
+      run.stats.batches = run.pagination.state.batchIndex;
+      run.stats.newComments = batch.newIds || 0;
+      if (run.paused || run.stopped) return;
+      if (!batch.ok) return stop('completed', `预览完成：${batch.terminalReason || '当前页面没有更多可加载评论。'}`);
+      if (!(await scan())) return;
+    }
+  }
   async function process() {
-    if (run.mode === 'preview' || !run.rules.keywords.length) { run.waiting = run.mode === 'preview' ? '预览完成，未执行删除。' : '扫描完成，未配置删除关键词。'; draw(); return stop(); }
+    if (run.mode === 'preview') return processPreview();
+    if (!run.rules.keywords.length) { run.waiting = '扫描完成，未配置删除关键词。'; draw(); return stop(); }
     let first = true;
     let emptyRescanAttempts = 0;
     while (!run.stopped && !run.paused) {
@@ -591,10 +641,10 @@
       const lock = await send({ type: 'ICC_ACQUIRE_LOCK', targetUrl: run.rules.targetUrl }); if (!lock.ok) throw new Error(lock.reason);
       if (!resuming) {
         resetStability();
-        run.stopped = false; run.mode = mode; run.startedAt = Date.now(); run.seenIds = new Set(); run.matchedIds = new Set(); run.skippedIds = new Set(); run.processedIds = new Set(); run.lastScanIds = new Set(); run.stats = { scanned: 0, matched: 0, deleted: 0, skipped: 0, loaded: 0 }; run.pace = new InstagramCommentPaceController(run.settings.pace);
+        run.stopped = false; run.mode = mode; run.startedAt = Date.now(); run.seenIds = new Set(); run.seenCommentIds = new Set(); run.seenReplyIds = new Set(); run.matchedIds = new Set(); run.skippedIds = new Set(); run.processedIds = new Set(); run.lastScanIds = new Set(); run.stats = { scanned: 0, matched: 0, deleted: 0, skipped: 0, loaded: 0, discovered: 0, topLevel: 0, replies: 0, batches: 0, newComments: 0 }; run.pace = new InstagramCommentPaceController(run.settings.pace); run.pagination = createPaginationLoader();
       } else {
         resetStability();
-        run.paused = false; run.error = ''; run.waiting = ''; run.state = 'idle';
+        run.paused = false; run.error = ''; run.waiting = ''; run.state = 'idle'; run.pagination = createPaginationLoader();
         if (run.pace?.state === 'REST') run.pace.restComplete();
       }
       run.starting = false; run.lockTimer = setInterval(() => send({ type: 'ICC_RENEW_LOCK', targetUrl: run.rules.targetUrl }), 30000); draw();

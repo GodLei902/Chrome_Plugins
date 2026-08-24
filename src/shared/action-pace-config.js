@@ -48,6 +48,14 @@
       targetPostUrl: typeof source.targetPostUrl === 'string' ? source.targetPostUrl.trim() : '',
       whitelist: typeof source.whitelist === 'string' ? source.whitelist.trim() : '',
       deleteKeywords: typeof source.deleteKeywords === 'string' ? source.deleteKeywords.trim() : '',
+      // 自动加载默认开启；关闭后预览仍只处理当前 DOM，正式删除需另行打开独立安全开关。
+      pagination: {
+        enabled: source.pagination ? source.pagination.enabled !== false : true,
+        maxBatches: positive(source.pagination?.maxBatches, 20),
+        noGrowthAttempts: positive(source.pagination?.noGrowthAttempts, 3),
+        stableWaitMs: positive(source.pagination?.stableWaitMs, 800),
+        allowDeletion: source.pagination?.allowDeletion === true,
+      },
       // 使用字符串保存“不限”，避免 Infinity 序列化到 chrome.storage 后变成 null。
       sessionLimit: sessionLimit(source.sessionLimit),
       sessionMaxMinutes: positive(source.sessionMaxMinutes, 120),
@@ -78,6 +86,9 @@
     const deleteDialogDelay = settings.pace.deleteDialogDelay;
     if (deleteDialogDelay.minSeconds > deleteDialogDelay.maxSeconds || deleteDialogDelay.meanSeconds < deleteDialogDelay.minSeconds || deleteDialogDelay.meanSeconds > deleteDialogDelay.maxSeconds) {
       throw new Error('点击删除前等待时间的最短值、平均值和最长值必须按从小到大填写。');
+    }
+    if (settings.pagination.maxBatches < 1 || settings.pagination.noGrowthAttempts < 1 || settings.pagination.stableWaitMs < 1) {
+      throw new Error('自动加载批次、无新增重试次数和稳定等待时间必须为正数。');
     }
     if (settings.pace.backoff.baseSeconds > settings.pace.backoff.maxSeconds) throw new Error('最长重试等待时间不能小于首次重试等待时间。');
     if (settings.sessionLimit !== 'unlimited' && settings.sessionLimit < 1) throw new Error('本次删除上限必须为正数或选择不限。');
