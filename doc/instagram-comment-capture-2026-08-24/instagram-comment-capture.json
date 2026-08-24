@@ -1,0 +1,178 @@
+{
+  "request": {
+    "method": "GET",
+    "url": "https://www.instagram.com/graphql/query/?doc_id=27144918868515421&variables=%7B%22media_id%22%3A%223970475254647536658%22%2C%22first%22%3A50%2C%22after%22%3Anull%2C%22before%22%3Anull%2C%22__relay_internal__pv__PolarisIsLoggedInrelayprovider%22%3Atrue%7D",
+    "headers": {
+      "User-Agent": "Mozilla/5.0",
+      "X-IG-App-ID": "936619743392459"
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "content-type": "application/json; charset=utf-8"
+    },
+    "body": {
+      "data": {
+        "xdt_api__v1__media__media_id__comments__connection": {
+          "edges": [
+            {
+              "node": {
+                "user": {
+                  "is_verified": false,
+                  "id": "36596999273",
+                  "pk": "36596999273",
+                  "is_unpublished": null,
+                  "profile_pic_url": "https://scontent-lax3-1.cdninstagram.com/v/t51.2885-19/573323465_1219825463302212_7278921664109726296_n.png?stp=dst-jpg_s150x150_tt6&efg=eyJ2ZW5jb2RlX3RhZyI6InByb2ZpbGVfcGljLmRqYW5nby4xNTAuYzIifQ&_nc_ht=scontent-lax3-1.cdninstagram.com&_nc_cat=1&_nc_oc=Q6cZ2gGSo0Zt6uFisXxlqhXACCeHR5pb5tdtaELraPocgpY9R0dK8nio-66WLBlDZ_igz09St-r15EwMYIrM4bhZ7Zxm&_nc_ohc=lPHSP0gNIksQ7kNvwGJR7Rm&_nc_gid=LJiZZX9d-l5xMx16pf851Q&edm=AKvmLXMBAAAA&ccb=7-5&ig_cache_key=YW5vbnltb3VzX3Byb2ZpbGVfcGlj.3-ccb7-5&oh=00_AQEHJ8Xl7ZEZzicKiaCnGsvH3xZaE3Pzxf6UyFIqwVe8Gg&oe=6A91B4EA&_nc_sid=eeeda2",
+                  "username": "godlei_001",
+                  "fbid_v2": "17841436698204624"
+                },
+                "pk": "18118670534314629",
+                "is_covered": false,
+                "child_comment_count": 1,
+                "restricted_status": null,
+                "has_translation": null,
+                "has_liked_comment": null,
+                "text": "良い",
+                "giphy_media_info": null,
+                "created_at": 1787549617,
+                "is_edited": null,
+                "parent_comment_id": null,
+                "fallback_user_info": null,
+                "comment_like_count": null,
+                "__typename": "XDTCommentDict"
+              },
+              "cursor": ""
+            },
+            {
+              "node": {
+                "user": {
+                  "is_verified": false,
+                  "id": "36596999273",
+                  "pk": "36596999273",
+                  "is_unpublished": null,
+                  "profile_pic_url": "https://scontent-lax3-1.cdninstagram.com/v/t51.2885-19/573323465_1219825463302212_7278921664109726296_n.png?stp=dst-jpg_s150x150_tt6&efg=eyJ2ZW5jb2RlX3RhZyI6InByb2ZpbGVfcGljLmRqYW5nby4xNTAuYzIifQ&_nc_ht=scontent-lax3-1.cdninstagram.com&_nc_cat=1&_nc_oc=Q6cZ2gGSo0Zt6uFisXxlqhXACCeHR5pb5tdtaELraPocgpY9R0dK8nio-66WLBlDZ_igz09St-r15EwMYIrM4bhZ7Zxm&_nc_ohc=lPHSP0gNIksQ7kNvwGJR7Rm&_nc_gid=LJiZZX9d-l5xMx16pf851Q&edm=AKvmLXMBAAAA&ccb=7-5&ig_cache_key=YW5vbnltb3VzX3Byb2ZpbGVfcGlj.3-ccb7-5&oh=00_AQEHJ8Xl7ZEZzicKiaCnGsvH3xZaE3Pzxf6UyFIqwVe8Gg&oe=6A91B4EA&_nc_sid=eeeda2",
+                  "username": "godlei_001",
+                  "fbid_v2": "17841436698204624"
+                },
+                "pk": "17967392286138453",
+                "is_covered": false,
+                "child_comment_count": 0,
+                "restricted_status": null,
+                "has_translation": null,
+                "has_liked_comment": null,
+                "text": "良い112",
+                "giphy_media_info": null,
+                "created_at": 1787549623,
+                "is_edited": null,
+                "parent_comment_id": null,
+                "fallback_user_info": null,
+                "comment_like_count": null,
+                "__typename": "XDTCommentDict"
+              },
+              "cursor": ""
+            },
+            {
+              "node": {
+                "user": {
+                  "is_verified": false,
+                  "id": "36596999273",
+                  "pk": "36596999273",
+                  "is_unpublished": null,
+                  "profile_pic_url": "https://scontent-lax3-1.cdninstagram.com/v/t51.2885-19/573323465_1219825463302212_7278921664109726296_n.png?stp=dst-jpg_s150x150_tt6&efg=eyJ2ZW5jb2RlX3RhZyI6InByb2ZpbGVfcGljLmRqYW5nby4xNTAuYzIifQ&_nc_ht=scontent-lax3-1.cdninstagram.com&_nc_cat=1&_nc_oc=Q6cZ2gGSo0Zt6uFisXxlqhXACCeHR5pb5tdtaELraPocgpY9R0dK8nio-66WLBlDZ_igz09St-r15EwMYIrM4bhZ7Zxm&_nc_ohc=lPHSP0gNIksQ7kNvwGJR7Rm&_nc_gid=LJiZZX9d-l5xMx16pf851Q&edm=AKvmLXMBAAAA&ccb=7-5&ig_cache_key=YW5vbnltb3VzX3Byb2ZpbGVfcGlj.3-ccb7-5&oh=00_AQEHJ8Xl7ZEZzicKiaCnGsvH3xZaE3Pzxf6UyFIqwVe8Gg&oe=6A91B4EA&_nc_sid=eeeda2",
+                  "username": "godlei_001",
+                  "fbid_v2": "17841436698204624"
+                },
+                "pk": "18625559599042811",
+                "is_covered": false,
+                "child_comment_count": 0,
+                "restricted_status": null,
+                "has_translation": null,
+                "has_liked_comment": null,
+                "text": "llll",
+                "giphy_media_info": null,
+                "created_at": 1787549583,
+                "is_edited": null,
+                "parent_comment_id": null,
+                "fallback_user_info": null,
+                "comment_like_count": null,
+                "__typename": "XDTCommentDict"
+              },
+              "cursor": ""
+            },
+            {
+              "node": {
+                "user": {
+                  "is_verified": false,
+                  "id": "36847703639",
+                  "pk": "36847703639",
+                  "is_unpublished": null,
+                  "profile_pic_url": "https://scontent-phx1-1.cdninstagram.com/v/t51.82787-19/784215040_18090301073231640_328882550000353375_n.jpg?stp=dst-jpg_s150x150_tt6&efg=eyJ2ZW5jb2RlX3RhZyI6InByb2ZpbGVfcGljLmRqYW5nby4xMDgwLmMyIn0&_nc_ht=scontent-phx1-1.cdninstagram.com&_nc_cat=100&_nc_oc=Q6cZ2gH_PHPr6KJ21yQXFduImu-P4Bawx68ORwE6uRrSxnUKg26dsksRtmlECzCyliCjnOE&_nc_ohc=zBAWBdeRBoUQ7kNvwEaZKal&_nc_gid=oYEAQm1q2RsLHXOU9uEpow&edm=AI1imfEBAAAA&ccb=7-5&oh=00_AQG_97Rgxf8GqItj0D-N41F9idU7dnHzLB7-_m8BZoFWDg&oe=6A91C39E&_nc_sid=3ad38e",
+                  "username": "lovenjackey",
+                  "fbid_v2": "17841436949185962"
+                },
+                "pk": "17942638671319233",
+                "is_covered": false,
+                "child_comment_count": 1,
+                "restricted_status": null,
+                "has_translation": null,
+                "has_liked_comment": null,
+                "text": "lineaaabbbb",
+                "giphy_media_info": null,
+                "created_at": 1787537646,
+                "is_edited": null,
+                "parent_comment_id": null,
+                "fallback_user_info": null,
+                "comment_like_count": null,
+                "__typename": "XDTCommentDict"
+              },
+              "cursor": ""
+            },
+            {
+              "node": {
+                "user": {
+                  "is_verified": false,
+                  "id": "36596999273",
+                  "pk": "36596999273",
+                  "is_unpublished": null,
+                  "profile_pic_url": "https://scontent-lax3-1.cdninstagram.com/v/t51.2885-19/573323465_1219825463302212_7278921664109726296_n.png?stp=dst-jpg_s150x150_tt6&efg=eyJ2ZW5jb2RlX3RhZyI6InByb2ZpbGVfcGljLmRqYW5nby4xNTAuYzIifQ&_nc_ht=scontent-lax3-1.cdninstagram.com&_nc_cat=1&_nc_oc=Q6cZ2gGSo0Zt6uFisXxlqhXACCeHR5pb5tdtaELraPocgpY9R0dK8nio-66WLBlDZ_igz09St-r15EwMYIrM4bhZ7Zxm&_nc_ohc=lPHSP0gNIksQ7kNvwGJR7Rm&_nc_gid=LJiZZX9d-l5xMx16pf851Q&edm=AKvmLXMBAAAA&ccb=7-5&ig_cache_key=YW5vbnltb3VzX3Byb2ZpbGVfcGlj.3-ccb7-5&oh=00_AQEHJ8Xl7ZEZzicKiaCnGsvH3xZaE3Pzxf6UyFIqwVe8Gg&oe=6A91B4EA&_nc_sid=eeeda2",
+                  "username": "godlei_001",
+                  "fbid_v2": "17841436698204624"
+                },
+                "pk": "18414567196154016",
+                "is_covered": false,
+                "child_comment_count": 0,
+                "restricted_status": null,
+                "has_translation": null,
+                "has_liked_comment": null,
+                "text": "資料を送付するLINE",
+                "giphy_media_info": null,
+                "created_at": 1787549674,
+                "is_edited": null,
+                "parent_comment_id": null,
+                "fallback_user_info": null,
+                "comment_like_count": null,
+                "__typename": "XDTCommentDict"
+              },
+              "cursor": ""
+            }
+          ],
+          "page_info": {
+            "end_cursor": null,
+            "has_next_page": false,
+            "start_cursor": null,
+            "has_previous_page": false
+          }
+        }
+      },
+      "extensions": {
+        "is_final": true,
+        "server_metadata": {
+          "request_start_time_ms": 1787552581736,
+          "time_at_flush_ms": 1787552581925
+        }
+      },
+      "status": "ok"
+    }
+  }
+}
