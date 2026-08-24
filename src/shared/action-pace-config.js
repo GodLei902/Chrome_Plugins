@@ -10,6 +10,10 @@
   };
 
   function positive(value, fallback) { return Number(value) > 0 ? Number(value) : fallback; }
+  function sessionLimit(value) {
+    if (String(value || '').trim().toLocaleLowerCase() === 'unlimited' || Number(value) === 0) return 'unlimited';
+    return positive(value, 30);
+  }
   function clone(value) { return JSON.parse(JSON.stringify(value)); }
   function normalizeDistribution(raw, fallback) {
     const source = raw || {};
@@ -40,7 +44,8 @@
       targetPostUrl: typeof source.targetPostUrl === 'string' ? source.targetPostUrl.trim() : '',
       whitelist: typeof source.whitelist === 'string' ? source.whitelist.trim() : '',
       deleteKeywords: typeof source.deleteKeywords === 'string' ? source.deleteKeywords.trim() : '',
-      sessionLimit: positive(source.sessionLimit, 30),
+      // 使用字符串保存“不限”，避免 Infinity 序列化到 chrome.storage 后变成 null。
+      sessionLimit: sessionLimit(source.sessionLimit),
       sessionMaxMinutes: positive(source.sessionMaxMinutes, 120),
       pace: {
         operation, rest,
@@ -66,6 +71,7 @@
       }
     }
     if (settings.pace.backoff.baseSeconds > settings.pace.backoff.maxSeconds) throw new Error('最长重试等待时间不能小于首次重试等待时间。');
+    if (settings.sessionLimit !== 'unlimited' && settings.sessionLimit < 1) throw new Error('本次删除上限必须为正数或选择不限。');
     return settings;
   }
   global.InstagramCommentPaceConfig = { DEFAULTS: clone(DEFAULTS), normalizeSettings, validateSettings };

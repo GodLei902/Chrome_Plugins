@@ -1,25 +1,210 @@
 (function () {
   'use strict';
   const KEY = 'socialCommentCleanerSettings';
-  const TEXT = { idle: '空闲', scanning: '扫描中', running: '运行中', 'cooling-down': '休息中', paused: '已暂停', error: '错误' };
-  const run = { stopped: true, starting: false, state: 'idle', stats: { scanned: 0, deleted: 0, skipped: 0 }, candidates: [], timer: null, lockTimer: null, waiting: '' };
+  const TEXT = { idle: '空闲', scanning: '扫描中', running: '运行中', 'cooling-down': '休息中', loading: '滚动加载中', completed: '已完成', paused: '已暂停', error: '错误' };
+  const run = { stopped: true, starting: false, state: 'idle', stats: { scanned: 0, deleted: 0, skipped: 0, loaded: 0, scrollRounds: 0, emptyRounds: 0 }, candidates: [], timer: null, lockTimer: null, waiting: '', error: '', seenIds: new Set(), skippedIds: new Set(), processedIds: new Set(), lastScanIds: new Set(), confirmed: false };
   const send = (message) => chrome.runtime.sendMessage(message).catch(() => ({ ok: false, reason: '扩展后台不可用。' }));
   const visible = (node) => { const rect = node.getBoundingClientRect(); return rect.width > 0 && rect.height > 0; };
   const text = (node) => (node.innerText || node.textContent || '').trim();
-  const wait = (ms, why) => new Promise((resolve) => { run.waiting = why; draw(); run.timer = setTimeout(() => { run.timer = null; run.waiting = ''; draw(); resolve(!run.stopped); }, ms); });
+  const normalizedText = (node) => text(node).replace(/\s+/g, ' ').trim();
+  // Instagram 会按界面语言显示折叠入口；只匹配完整短语，避免误点“回复”按钮。
+  const replyExpander = /^(?:view|see)\s+(?:all\s+)?(?:\d+\s+)?(?:more\s+)?repl(?:y|ies)|^\d+\s+repl(?:y|ies)\s+(?:to\s+)?view$|^\d+件(?:すべての)?返信を見る$|^返信をすべて見る$|^すべての返信を見る$|^查看(?:全部|所有)?回复$|^查看\s*\d+\s*条回复$/i;
+  const hiddenCommentExpander = /^(?:see|view)\s+hidden\s+comments?$|^非表示のコメントを見る$|^非表示.*コメント.*見る$|^查看隐藏评论$|^查看.*隐藏.*评论$/i;
+  const menuLabel = /(?:^more$|more\s+options?|options?|comment options?|评论(?:的)?选项|选项|更多|その他|オプション|メニュー|^…$|^\.\.\.$)/i;
+  const deleteLabel = /^(?:delete|删除|刪除|削除)(?:\s*(?:comment|コメント))?(?:する)?$/i;
+  function finishWait(value) { const resolve = run.waitResolve; run.waitResolve = null; run.waitObserver?.disconnect(); run.waitObserver = null; clearTimeout(run.timer); run.timer = null; run.waiting = ''; draw(); if (resolve) resolve(value); }
+  const wait = (ms, why) => new Promise((resolve) => { run.waiting = why; run.waitResolve = resolve; draw(); run.timer = setTimeout(() => finishWait(!run.stopped), ms); });
+  function waitForCondition(predicate, timeoutMs, why) {
+    return new Promise((resolve) => {
+      const startedAt = Date.now();
+      const check = () => {
+        if (run.stopped) return finishWait(false);
+        let matched = false;
+        try { matched = Boolean(predicate()); } catch { matched = false; }
+        if (matched || Date.now() - startedAt >= timeoutMs) return finishWait(matched);
+        run.timer = setTimeout(check, 120);
+      };
+      run.waiting = why;
+      run.waitResolve = resolve;
+      if (typeof MutationObserver === 'function' && document.body) { run.waitObserver = new MutationObserver(check); run.waitObserver.observe(document.body, { subtree: true, childList: true, attributes: true, characterData: true }); }
+      draw();
+      check();
+    });
+  }
 
-  function draw() { if (!run.ui) return; run.ui.querySelector('[data-state]').textContent = TEXT[run.state]; run.ui.querySelector('[data-stats]').textContent = `扫描 ${run.stats.scanned} · 候选 ${run.candidates.length} · 删除 ${run.stats.deleted} · 跳过 ${run.stats.skipped}`; run.ui.querySelector('[data-wait]').textContent = run.waiting; run.ui.querySelector('[data-error]').textContent = run.error || ''; const busy = !run.stopped || run.starting; run.ui.querySelector('[data-start]').disabled = busy; run.ui.querySelector('[data-preview]').disabled = busy; run.ui.querySelector('[data-stop]').disabled = !busy; }
-  function panel() { if (document.getElementById('icc-host')) return; const host = document.createElement('div'); host.id = 'icc-host'; host.style.cssText = 'position:fixed;right:16px;bottom:16px;z-index:2147483647'; const root = host.attachShadow({ mode: 'open' }); root.innerHTML = `<style>main{font:13px system-ui;color:#111;background:#fff;border:1px solid #d1d5db;border-radius:8px;box-shadow:0 8px 28px #0003;width:288px;padding:14px}h2{font-size:14px;margin:0 0 10px}p{margin:7px 0}.muted{color:#666}.wait{color:#075985;min-height:1em}.error{color:#b42318;min-height:1em}.actions{display:flex;gap:6px}button{border:0;border-radius:6px;padding:7px 10px;background:#2563eb;color:#fff}button[data-preview]{background:#0f766e}button[data-stop]{background:#6b7280;margin-top:8px}button:disabled{opacity:.5}</style><main><h2>社交评论清理器</h2><p>状态：<b data-state>空闲</b></p><p class=muted data-stats></p><p class=wait data-wait></p><p class=error data-error></p><div class=actions><button data-start>开始</button><button data-preview>预览模式</button></div><button data-stop>停止</button></main>`; run.ui = root; document.documentElement.append(host); root.querySelector('[data-start]').onclick = () => start('run'); root.querySelector('[data-preview]').onclick = () => start('preview'); root.querySelector('[data-stop]').onclick = () => stop(); draw(); }
+  function draw() { if (!run.ui) return; run.ui.querySelector('[data-state]').textContent = TEXT[run.state] || run.state; run.ui.querySelector('[data-stats]').textContent = `扫描 ${run.stats.scanned} · 已加载回复 ${run.stats.loaded} · 候选 ${run.candidates.length} · 删除 ${run.stats.deleted} · 跳过 ${run.stats.skipped} · 滚动 ${run.stats.scrollRounds} · 空轮 ${run.stats.emptyRounds}`; run.ui.querySelector('[data-wait]').textContent = run.waiting; run.ui.querySelector('[data-error]').textContent = run.error || ''; const busy = !run.stopped || run.starting; run.ui.querySelector('[data-start]').disabled = busy; run.ui.querySelector('[data-preview]').disabled = busy; run.ui.querySelector('[data-stop]').disabled = !busy; }
+  function panel() { if (document.getElementById('icc-host')) return; const host = document.createElement('div'); host.id = 'icc-host'; host.style.cssText = 'position:fixed;right:16px;bottom:16px;z-index:2147483647'; const root = host.attachShadow({ mode: 'open' }); root.innerHTML = `<style>main{font:13px system-ui;color:#111;background:#fff;border:1px solid #d1d5db;border-radius:8px;box-shadow:0 8px 28px #0003;width:320px;padding:14px}h2{font-size:14px;margin:0 0 10px}p{margin:7px 0}.muted{color:#666}.wait{color:#075985;min-height:1em}.error{color:#b42318;min-height:1em}.actions{display:flex;gap:6px}button{border:0;border-radius:6px;padding:7px 10px;background:#2563eb;color:#fff}button[data-preview]{background:#0f766e}button[data-stop]{background:#6b7280;margin-top:8px}button:disabled{opacity:.5}</style><main><h2>社交评论清理器</h2><p>状态：<b data-state>空闲</b></p><p class=muted data-stats></p><p class=wait data-wait></p><p class=error data-error></p><div class=actions><button data-start>开始</button><button data-preview>预览模式</button></div><button data-stop>停止</button></main>`; run.ui = root; document.documentElement.append(host); root.querySelector('[data-start]').onclick = () => start('run'); root.querySelector('[data-preview]').onclick = () => start('preview'); root.querySelector('[data-stop]').onclick = () => stop(); draw(); }
   function dataNodes(value, found = []) { if (!value || typeof value !== 'object') return found; for (const [key, child] of Object.entries(value)) { if (key === '__typename' && child === 'XDTCommentDict') found.push(value); dataNodes(child, found); } return found; }
   // 优先按目标 shortcode 读取媒体 owner，避免把其他推荐媒体作者当成帖子作者。
   function mediaAuthors(value, shortcode, found = []) { if (!value || typeof value !== 'object') return found; const code = String(value.shortcode || value.code || ''); const looksLikeMedia = /media/i.test(String(value.__typename || '')) || Boolean(code && (value.owner?.username || value.user?.username)); if (looksLikeMedia && (value.owner?.username || value.user?.username) && (!shortcode || code === shortcode)) found.push(value.owner?.username || value.user?.username); for (const child of Object.values(value)) mediaAuthors(child, shortcode, found); return found; }
-  function threads() { const source = new Map(); const authors = new Set(); const allAuthors = new Set(); const shortcode = InstagramCommentRules.normalizeTargetUrl(run.rules.targetUrl).split('/').filter(Boolean).pop() || ''; for (const script of document.querySelectorAll('script[type="application/json"]')) try { const data = JSON.parse(script.textContent || ''); mediaAuthors(data, shortcode, authors); mediaAuthors(data, '', allAuthors); for (const node of dataNodes(data)) { const id = String(node.pk || node.id || ''); if (id && node.user?.username && node.text) source.set(id, { id, parentId: node.parent_comment_id == null ? '' : String(node.parent_comment_id), username: node.user.username, text: node.text, childCount: Number(node.child_comment_count) || 0 }); } } catch { /* Ignore unrelated JSON. */ } const authorUsername = authors.values().next().value || (allAuthors.size === 1 ? allAuthors.values().next().value : ''); const mapped = [...source.values()].map((comment) => ({ ...comment, isPostAuthor: Boolean(authorUsername) && InstagramCommentRules.normalizeUsername(comment.username) === InstagramCommentRules.normalizeUsername(authorUsername), element: [...document.querySelectorAll('span')].filter(visible).filter((node) => text(node) === comment.text).map((node) => node.closest('li, article, div')).find(visible) })); const all = new Map(mapped.filter((item) => item.element).map((item) => [item.id, { ...item, replies: [] }])); const parents = []; for (const item of all.values()) { const parent = all.get(item.parentId); if (parent) parent.replies.push(item); else parents.push(item); } parents.forEach((item) => { item.hasUnloadedReplies = item.childCount > item.replies.length; }); return parents; }
-  async function scan() { run.state = 'scanning'; draw(); if (/(challenge_required|try again later|验证|verification|rate limit)/i.test(document.body.innerText)) throw new Error('检测到验证、限流或异常页面，已暂停。'); const list = threads(); if (!list.length) throw new Error('未找到可可靠定位的已加载评论。'); const result = InstagramCommentRules.selectCandidates(list, run.rules); run.candidates = result.candidates; run.stats.scanned += result.scanned; run.stats.skipped += result.skipped; run.state = 'idle'; draw(); }
-  async function remove(candidate) { candidate.element.scrollIntoView({ block: 'center' }); candidate.element.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })); if (!(await wait(250, '正在定位评论菜单...'))) return false; const more = [...candidate.element.querySelectorAll('button,[role="button"]')].find((node) => visible(node) && /(options|more|评论选项|选项)/i.test(`${node.getAttribute('aria-label') || ''} ${node.querySelector('svg')?.getAttribute('aria-label') || ''}`)); if (!more) throw new Error('未找到可靠的评论菜单，已暂停。'); more.click(); if (!(await wait(500, '正在等待删除菜单...'))) return false; const del = [...document.querySelectorAll('[role="menuitem"],[role="button"],button')].find((node) => visible(node) && /^(delete|删除|刪除|削除)$/i.test(text(node))); if (!del) throw new Error('没有可靠的删除项，可能缺少权限。'); del.click(); if (!(await wait(450, '正在等待删除确认...'))) return false; const confirm = [...document.querySelectorAll('[role="dialog"] button,[role="dialog"] [role="button"]')].find((node) => visible(node) && /^(delete|删除|刪除|削除)$/i.test(text(node))); if (!confirm) throw new Error('未找到删除确认按钮，已暂停。'); confirm.click(); return wait(800, '正在确认删除结果...'); }
-  async function stop(finalState = 'idle') { run.stopped = true; clearTimeout(run.timer); clearInterval(run.lockTimer); run.timer = null; run.lockTimer = null; run.state = finalState; run.waiting = ''; draw(); if (run.rules) await send({ type: 'ICC_RELEASE_LOCK', targetUrl: run.rules.targetUrl }); }
+  function locateCommentElement(comment) {
+    const expectedText = String(comment.text || '').replace(/\s+/g, ' ').trim();
+    const expectedUsername = String(comment.username || '').toLocaleLowerCase();
+    const spans = [...document.querySelectorAll('span')].filter((node) => visible(node) && normalizedText(node) === expectedText);
+    for (const span of spans) {
+      let node = span;
+      for (let depth = 0; node && depth < 8; depth += 1, node = node.parentElement) {
+        if (!visible(node)) continue;
+        const body = normalizedText(node);
+        if (body.toLocaleLowerCase().includes(expectedUsername) && (node.matches('li,article') || node.querySelector('button,[role="button"]'))) return node;
+      }
+    }
+    return spans.map((node) => node.closest('li,article,div')).find(visible) || null;
+  }
+  function isCommentMenu(node) {
+    const label = `${node.getAttribute('aria-label') || ''} ${node.getAttribute('title') || ''} ${node.querySelector('svg')?.getAttribute('aria-label') || ''} ${normalizedText(node)}`.trim();
+    // 展开回复按钮也可能带有 More 文案，必须先排除，防止误点后改变扫描范围。
+    if (replyExpander.test(normalizedText(node)) || hiddenCommentExpander.test(normalizedText(node))) return false;
+    return menuLabel.test(label);
+  }
+  async function revealCollapsedComments() {
+    const clicked = new WeakSet();
+    let count = 0;
+    for (let pass = 0; pass < 40 && !run.stopped; pass += 1) {
+      const control = [...document.querySelectorAll('button,[role="button"]')].find((node) => {
+        if (clicked.has(node) || !visible(node)) return false;
+        const label = normalizedText(node) || `${node.getAttribute('aria-label') || ''} ${node.getAttribute('title') || ''}`.trim();
+        return replyExpander.test(label) || hiddenCommentExpander.test(label);
+      });
+      if (!control) return;
+      clicked.add(control);
+      control.click();
+      count += 1;
+      // Windows/日文界面下展开动作通常伴随一次网络请求，留出足够时间让 JSON 和 DOM 同步。
+      if (!(await wait(900, '正在展开折叠的回复和非表示评论...'))) return count;
+    }
+    return count;
+  }
+  function threads() {
+    const source = new Map(); const authors = new Set(); const allAuthors = new Set();
+    const shortcode = InstagramCommentRules.normalizeTargetUrl(run.rules.targetUrl).split('/').filter(Boolean).pop() || '';
+    for (const script of document.querySelectorAll('script[type="application/json"]')) try {
+      const data = JSON.parse(script.textContent || '');
+      mediaAuthors(data, shortcode, authors); mediaAuthors(data, '', allAuthors);
+      for (const node of dataNodes(data)) {
+        const id = String(node.pk || node.id || '');
+        if (id && node.user?.username && node.text) source.set(id, { id, parentId: node.parent_comment_id == null ? '' : String(node.parent_comment_id), username: node.user.username, text: node.text, childCount: Number(node.child_comment_count) || 0 });
+      }
+    } catch { /* Ignore unrelated JSON. */ }
+    const authorUsername = authors.values().next().value || (allAuthors.size === 1 ? allAuthors.values().next().value : '');
+    const mapped = [...source.values()].map((comment) => ({ ...comment, isPostAuthor: Boolean(authorUsername) && InstagramCommentRules.normalizeUsername(comment.username) === InstagramCommentRules.normalizeUsername(authorUsername), element: locateCommentElement(comment) }));
+    const all = new Map(mapped.filter((item) => item.element).map((item) => [item.id, { ...item, replies: [] }]));
+    const parents = []; const orphanReplies = new Map();
+    for (const item of all.values()) {
+      const parent = all.get(item.parentId);
+      if (item.parentId && parent) parent.replies.push(item);
+      else if (item.parentId) {
+        if (!orphanReplies.has(item.parentId)) orphanReplies.set(item.parentId, { id: `orphan:${item.parentId}`, username: '', text: '', replies: [] });
+        orphanReplies.get(item.parentId).replies.push(item);
+      } else parents.push(item);
+    }
+    parents.push(...orphanReplies.values());
+    parents.forEach((item) => { item.hasUnloadedReplies = item.childCount > item.replies.length; });
+    return parents;
+  }
+  function replyIds(list) { return new Set(list.flatMap((thread) => thread.replies.map((reply) => reply.id)).filter(Boolean)); }
+  async function scan() {
+    run.state = 'scanning'; draw();
+    if (/(challenge_required|try again later|验证|verification|rate limit)/i.test(document.body.innerText)) throw new Error('检测到验证、限流或异常页面，已暂停。');
+    const expanded = await revealCollapsedComments(); if (run.stopped) return { ids: new Set(), newIds: 0, expanded };
+    const list = threads(); const ids = replyIds(list); let newIds = 0;
+    ids.forEach((id) => { if (!run.seenIds.has(id)) { run.seenIds.add(id); newIds += 1; } });
+    const result = InstagramCommentRules.selectCandidates(list, run.rules);
+    run.candidates = result.candidates.filter((candidate) => !run.processedIds.has(candidate.id));
+    run.stats.scanned += newIds; run.stats.loaded = run.seenIds.size;
+    result.skippedIds.forEach((id) => { if (!run.skippedIds.has(id)) { run.skippedIds.add(id); run.stats.skipped += 1; } });
+    run.lastScanIds = ids; run.state = 'idle'; draw();
+    return { ids, newIds, expanded };
+  }
+  function findScrollContainer() {
+    const anchor = run.candidates[0]?.element;
+    if (anchor) {
+      let node = anchor.parentElement;
+      while (node && node !== document.body) { if (node.scrollHeight > node.clientHeight + 80 && visible(node)) return node; node = node.parentElement; }
+    }
+    const candidates = [document.scrollingElement, ...document.querySelectorAll('main,section,div')].filter((node) => node && node.scrollHeight > node.clientHeight + 80 && visible(node));
+    return candidates.sort((a, b) => (b.scrollHeight - b.clientHeight) - (a.scrollHeight - a.clientHeight))[0] || document.scrollingElement;
+  }
+  async function loadNextBatch(previousIds) {
+    run.state = 'loading'; run.stats.scrollRounds += 1; draw();
+    const container = findScrollContainer(); const before = new Set(previousIds); const amount = Math.max(360, Math.floor((container.clientHeight || window.innerHeight || 720) * 0.75));
+    if (container === document.scrollingElement) window.scrollBy({ top: amount, behavior: 'auto' });
+    else container.scrollBy({ top: amount, behavior: 'auto' });
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const changed = await waitForCondition(() => {
+      const current = threads(); return current.some((thread) => thread.replies.some((reply) => reply.id && !before.has(reply.id)));
+    }, 4500, '正在等待评论区加载下一批回复...');
+    const result = await scan();
+    const added = result.newIds > 0 || result.expanded > 0;
+    if (added || changed) run.stats.emptyRounds = 0; else run.stats.emptyRounds += 1;
+    draw(); return added || changed;
+  }
+  async function waitForDeleted(candidate) {
+    const expectedText = String(candidate.text || '').replace(/\s+/g, ' ').trim();
+    return waitForCondition(() => !candidate.element.isConnected || !visible(candidate.element) || !normalizedText(candidate.element).includes(expectedText), 7000, '正在确认回复已删除...');
+  }
+  async function remove(candidate) {
+    if (!candidate.element?.isConnected) throw new Error('目标回复已被页面刷新，正在重新扫描。');
+    candidate.element.scrollIntoView({ block: 'center', behavior: 'auto' });
+    ['pointerover', 'mouseover', 'mousemove'].forEach((type) => candidate.element.dispatchEvent(new MouseEvent(type, { bubbles: true })));
+    candidate.element.focus?.();
+    const scopes = []; for (let node = candidate.element, depth = 0; node && depth < 6; node = node.parentElement, depth += 1) scopes.push(node);
+    const more = scopes.flatMap((scope) => [...scope.querySelectorAll('button,[role="button"]')]).find((node) => visible(node) && isCommentMenu(node));
+    if (!more) throw new Error('未找到可靠的评论菜单，已暂停。');
+    more.focus?.(); more.click();
+    const menuReady = await waitForCondition(() => [...document.querySelectorAll('[role="menu"],[role="menuitem"]')].some(visible), 5000, '正在等待删除菜单...');
+    if (!menuReady) throw new Error('删除菜单未出现，已暂停。');
+    const del = [...document.querySelectorAll('[role="menuitem"],[role="button"],button')].find((node) => visible(node) && deleteLabel.test(normalizedText(node)));
+    if (!del) throw new Error('没有可靠的删除项，可能缺少权限。');
+    del.click();
+    const dialogReady = await waitForCondition(() => [...document.querySelectorAll('[role="dialog"]')].some(visible), 5000, '正在等待删除确认...');
+    if (!dialogReady) throw new Error('删除确认框未出现，已暂停。');
+    const confirm = [...document.querySelectorAll('[role="dialog"] button,[role="dialog"] [role="button"]')].find((node) => visible(node) && deleteLabel.test(normalizedText(node)));
+    if (!confirm) throw new Error('未找到删除确认按钮，已暂停。');
+    confirm.click();
+    if (!(await waitForDeleted(candidate))) throw new Error('未确认回复已删除，已暂停。');
+    return true;
+  }
+  async function stop(finalState = 'idle', reason = '') { run.stopped = true; if (run.waitResolve) finishWait(false); else clearTimeout(run.timer); clearInterval(run.lockTimer); run.timer = null; run.lockTimer = null; run.state = finalState; if (reason) run.waiting = reason; else if (finalState !== 'completed') run.waiting = ''; draw(); if (run.rules) await send({ type: 'ICC_RELEASE_LOCK', targetUrl: run.rules.targetUrl }); }
   async function acquire() { while (!run.stopped) { const result = await send({ type: 'ICC_RATE_ACQUIRE', limits: run.settings.pace.rateLimit }); if (result.ok) return true; if (!Number.isFinite(result.retryAfterMs)) throw new Error(result.reason || '无法申请操作额度。'); if (!(await wait(result.retryAfterMs, `全局操作上限已满，等待 ${Math.ceil(result.retryAfterMs / 1000)} 秒...`))) return false; } return false; }
-  async function process() { if (run.mode === 'preview' || !run.rules.keywords.length) { run.waiting = '预览完成，未执行删除。'; draw(); return stop(); } if (!run.candidates.length || !window.confirm(`本轮找到 ${run.candidates.length} 条候选评论，确认删除吗？`)) return stop(); let first = true; while (run.candidates.length && !run.stopped) { const candidate = run.candidates.shift(); try { if (run.stats.deleted >= run.settings.sessionLimit) throw new Error('已达到本次会话删除上限。'); if (!first && !(await wait(InstagramCommentDelay.generateDelayMs(run.settings.pace.operation), '正在等待下一次操作...'))) return; first = false; if (!(await acquire())) return; if (await remove(candidate)) { run.stats.deleted++; const state = run.pace.success(); if (state === 'REST') { run.state = 'cooling-down'; if (!(await wait(InstagramCommentDelay.generateDelayMs(run.settings.pace.rest), '连续处理达到上限，正在休息...'))) return; run.pace.restComplete(); await scan(); first = true; } } } catch (error) { run.error = error.message; return stop('paused'); } } await stop(); }
-  async function start(mode) { if (!run.stopped || run.starting) return; run.starting = true; try { run.settings = InstagramCommentPaceConfig.validateSettings((await chrome.storage.sync.get(KEY))[KEY] || {}); run.rules = InstagramCommentRules.prepareRules(run.settings); if (InstagramCommentRules.normalizeTargetUrl(location.href) !== run.rules.targetUrl) throw new Error('当前 URL 与设置的目标帖子不匹配。'); const lock = await send({ type: 'ICC_ACQUIRE_LOCK', targetUrl: run.rules.targetUrl }); if (!lock.ok) throw new Error(lock.reason); run.stopped = false; run.starting = false; run.mode = mode; run.stats = { scanned: 0, deleted: 0, skipped: 0 }; run.pace = new InstagramCommentPaceController(run.settings.pace); run.lockTimer = setInterval(() => send({ type: 'ICC_RENEW_LOCK', targetUrl: run.rules.targetUrl }), 30000); await scan(); await process(); } catch (error) { run.starting = false; run.stopped = true; run.state = 'paused'; run.error = error.message; draw(); } }
+  async function process() {
+    if (run.mode === 'preview' || !run.rules.keywords.length) { run.waiting = '预览完成，未执行删除。'; draw(); return stop(); }
+    let first = true;
+    while (!run.stopped) {
+      if (run.settings.sessionMaxMinutes && Date.now() - run.startedAt >= run.settings.sessionMaxMinutes * 60000) return stop('paused', '已达到本次任务运行时间上限。');
+      if (run.settings.sessionLimit !== 'unlimited' && run.stats.deleted >= run.settings.sessionLimit) return stop('paused', '已达到本次任务删除数量上限。');
+      if (run.candidates.length) {
+        if (!run.confirmed) { run.confirmed = true; if (!window.confirm(`本次将持续处理命中的子级回复，当前已找到 ${run.candidates.length} 条候选，确认开始吗？`)) return stop(); }
+        const candidate = run.candidates.shift();
+        if (run.processedIds.has(candidate.id)) continue;
+        try {
+          if (!first && !(await wait(InstagramCommentDelay.generateDelayMs(run.settings.pace.operation), '正在等待下一次操作...'))) return;
+          first = false; if (!(await acquire())) return;
+          run.state = 'running'; draw();
+          await remove(candidate); run.processedIds.add(candidate.id); run.stats.deleted += 1;
+          const state = run.pace.success(); await scan();
+          if (state === 'REST') { run.state = 'cooling-down'; draw(); if (!(await wait(InstagramCommentDelay.generateDelayMs(run.settings.pace.rest), '连续处理达到上限，正在休息...'))) return; run.pace.restComplete(); first = true; await scan(); }
+        } catch (error) {
+          if (error.message === '目标回复已被页面刷新，正在重新扫描。') { await scan(); continue; }
+          run.error = error.message; return stop('paused');
+        }
+        continue;
+      }
+      const before = new Set(run.lastScanIds); const loaded = await loadNextBatch(before);
+      if (!loaded && run.stats.emptyRounds >= 3) return stop('completed', '已完成：连续三轮没有新的可加载子级回复。');
+    }
+  }
+  async function start(mode) {
+    if (!run.stopped || run.starting) return; run.starting = true;
+    try {
+      run.settings = InstagramCommentPaceConfig.validateSettings((await chrome.storage.sync.get(KEY))[KEY] || {}); run.rules = InstagramCommentRules.prepareRules(run.settings);
+      if (InstagramCommentRules.normalizeTargetUrl(location.href) !== run.rules.targetUrl) throw new Error('当前 URL 与设置的目标帖子不匹配。');
+      const lock = await send({ type: 'ICC_ACQUIRE_LOCK', targetUrl: run.rules.targetUrl }); if (!lock.ok) throw new Error(lock.reason);
+      run.stopped = false; run.starting = false; run.mode = mode; run.startedAt = Date.now(); run.error = ''; run.waiting = ''; run.confirmed = false; run.seenIds = new Set(); run.skippedIds = new Set(); run.processedIds = new Set(); run.lastScanIds = new Set(); run.stats = { scanned: 0, deleted: 0, skipped: 0, loaded: 0, scrollRounds: 0, emptyRounds: 0 };
+      run.pace = new InstagramCommentPaceController(run.settings.pace); run.lockTimer = setInterval(() => send({ type: 'ICC_RENEW_LOCK', targetUrl: run.rules.targetUrl }), 30000);
+      await scan(); await process();
+    } catch (error) { run.starting = false; run.stopped = true; run.state = 'paused'; run.error = error.message; draw(); }
+  }
   chrome.runtime.onMessage.addListener((message, sender, reply) => { if (!['ICC_START', 'ICC_PREVIEW'].includes(message?.type)) return false; start(message.type === 'ICC_START' ? 'run' : 'preview'); reply({ ok: true }); return false; });
   if (InstagramCommentRules.normalizeTargetUrl(location.href)) panel();
 })();

@@ -47,20 +47,17 @@
 
   function selectCandidates(threads, rules) {
     const candidates = [];
+    const skippedIds = [];
     let scanned = 0;
     let skipped = 0;
     for (const thread of threads) {
-      scanned += 1 + thread.replies.length;
+      scanned += thread.replies.length;
       for (const reply of thread.replies) {
-        if (isAuthorComment(reply, rules) || isWhitelisted(reply, rules)) { skipped++; continue; }
+        if (isAuthorComment(reply, rules) || isWhitelisted(reply, rules)) { skipped++; if (reply.id) skippedIds.push(reply.id); continue; }
         if (matchesKeyword(reply, rules)) candidates.push({ ...reply, kind: 'reply', parent: thread });
       }
-      if (isAuthorComment(thread, rules) || isWhitelisted(thread, rules)) { skipped++; continue; }
-      if (thread.replies.some((reply) => isAuthorComment(reply, rules) || isWhitelisted(reply, rules))) { skipped++; continue; }
-      if (thread.hasUnloadedReplies) { skipped++; continue; }
-      if (matchesKeyword(thread, rules)) candidates.push({ ...thread, kind: 'comment' });
     }
-    return { candidates: candidates.sort((a, b) => (a.kind === 'reply' ? -1 : 1) - (b.kind === 'reply' ? -1 : 1)), scanned, skipped };
+    return { candidates, skippedIds, scanned, skipped };
   }
 
   global.InstagramCommentRules = { normalizeUsername, normalizeTargetUrl, prepareRules, isWhitelisted, isAuthorComment, matchesKeyword, selectCandidates };
