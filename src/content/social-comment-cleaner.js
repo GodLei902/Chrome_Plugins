@@ -1,9 +1,15 @@
 (function () {
   'use strict';
   const KEY = 'socialCommentCleanerSettings';
+  const UI_CLOSED_KEY = 'socialCommentCleanerUiClosed';
   const TEXT = { idle: '空闲', 'waiting-surface': '等待评论区', expanding: '展开中', stabilizing: '等待稳定', scanning: '扫描中', loading: '加载下一批', 'waiting-load': '等待下一批', running: '运行中', 'waiting-delete': '确认删除', 'cooling-down': '当前轮次休息', 'scheduled-rest': '等待下一轮', completed: '已完成', paused: '已暂停', error: '错误' };
   const stabilityDefaults = globalThis.InstagramCommentSurfaceStability?.DEFAULTS || { mutationDebounceMs: 250, rafConfirmCount: 2, stablePasses: 2, initialReadyTimeoutMs: 15000, postDeleteSettleTimeoutMs: 10000, emptyRescanAttempts: 3 };
-  const run = { stopped: true, paused: false, starting: false, mode: 'preview', state: 'idle', sessionId: '', startedAt: 0, stats: { scanned: 0, matched: 0, deleted: 0, skipped: 0, loaded: 0, discovered: 0, topLevel: 0, replies: 0, batches: 0, newComments: 0 }, candidates: [], timer: null, restTimer: null, lockTimer: null, waiting: '', error: '', refresh: { count: 0, restStartedAt: 0, restDelayMs: 0, nextRefreshAt: 0, lastReason: '' }, seenIds: new Set(), seenCommentIds: new Set(), seenReplyIds: new Set(), matchedIds: new Set(), skippedIds: new Set(), processedIds: new Set(), lastScanIds: new Set(), scanInFlight: false, scanGeneration: 0, pagination: null, stability: { surface: null, surfaceGeneration: 0, mutationVersion: 0, lastMutationAt: 0, observer: null, discoveryObserver: null, pending: new Set(), discoveryCount: 0, stage: '', lastSnapshot: '' } };
+  const panelState = globalThis.SocialCommentFloatingPanel;
+  const initialPanelState = panelState?.createState?.() || { uiMode: 'launcher', launcherPosition: { edge: 'right', offset: 64 }, drag: {} };
+  const run = { stopped: true, paused: false, starting: false, pauseFailure: false, mode: 'preview', state: 'idle', sessionId: '', startedAt: 0, stats: { scanned: 0, matched: 0, deleted: 0, skipped: 0, loaded: 0, discovered: 0, topLevel: 0, replies: 0, batches: 0, newComments: 0 }, candidates: [], timer: null, restTimer: null, lockTimer: null, waiting: '', error: '', refresh: { count: 0, restStartedAt: 0, restDelayMs: 0, nextRefreshAt: 0, lastReason: '' }, seenIds: new Set(), seenCommentIds: new Set(), seenReplyIds: new Set(), matchedIds: new Set(), skippedIds: new Set(), processedIds: new Set(), lastScanIds: new Set(), scanInFlight: false, scanGeneration: 0, pagination: null, ui: null, host: null, uiMode: initialPanelState.uiMode, launcherPosition: { ...initialPanelState.launcherPosition }, drag: { ...initialPanelState.drag }, closeDialog: null, stability: { surface: null, surfaceGeneration: 0, mutationVersion: 0, lastMutationAt: 0, observer: null, discoveryObserver: null, pending: new Set(), discoveryCount: 0, stage: '', lastSnapshot: '' } };
+  function uiClosedStorageKey() { return `${UI_CLOSED_KEY}:${location.origin}${location.pathname}`; }
+  function isUiClosed() { try { return globalThis.sessionStorage?.getItem(uiClosedStorageKey()) === '1'; } catch { return false; } }
+  function setUiClosed(closed) { try { if (closed) globalThis.sessionStorage?.setItem(uiClosedStorageKey(), '1'); else globalThis.sessionStorage?.removeItem(uiClosedStorageKey()); } catch { /* 隐私模式禁用 sessionStorage 时仍可正常运行 */ } }
   function send(message) {
     // 扩展热重载后，旧页面脚本仍可能运行在已失效的上下文中；此时
     // sendMessage 会同步抛错，不能只依赖 Promise.catch 捕获。
@@ -67,20 +73,135 @@
 
   function draw() {
     if (!run.ui) return;
-    run.ui.querySelector('[data-state]').textContent = TEXT[run.state] || run.state;
-    run.ui.querySelector('[data-stats]').textContent = `累计一级评论 ${run.stats.topLevel} · 累计回复 ${run.stats.replies} · 命中 ${run.stats.matched} · 待处理 ${run.candidates.length} · 删除 ${run.stats.deleted} · 跳过 ${run.stats.skipped}`;
+    const query = (selector) => run.ui.querySelector(selector);
+    const stateNode = query('[data-state]'); if (stateNode) stateNode.textContent = TEXT[run.state] || run.state;
+    const statsNode = query('[data-stats]'); if (statsNode) statsNode.textContent = `累计一级评论 ${run.stats.topLevel} · 累计回复 ${run.stats.replies} · 命中 ${run.stats.matched} · 待处理 ${run.candidates.length} · 删除 ${run.stats.deleted} · 跳过 ${run.stats.skipped}`;
     const paginationState = run.pagination?.getSnapshot?.() || run.pagination?.state;
-    run.ui.querySelector('[data-pagination]').textContent = paginationState
+    const paginationNode = query('[data-pagination]'); if (paginationNode) paginationNode.textContent = paginationState
       ? `加载轮次 ${paginationState.batchIndex} · 本轮新增 ${paginationState.newIds} · 无新增 ${paginationState.noGrowthAttempts}/${run.settings?.pagination?.noGrowthAttempts || 0}`
       : '连续加载已启用';
     const restLeft = run.state === 'scheduled-rest' && run.refresh.nextRefreshAt ? Math.max(0, run.refresh.nextRefreshAt - Date.now()) : 0;
-    run.ui.querySelector('[data-wait]').textContent = restLeft ? `本轮已完成，${Math.ceil(restLeft / 60000)} 分钟后刷新并继续。` : run.waiting;
-    run.ui.querySelector('[data-error]').textContent = run.error || '';
+    const waitNode = query('[data-wait]'); if (waitNode) waitNode.textContent = restLeft ? `本轮已完成，${Math.ceil(restLeft / 60000)} 分钟后刷新并继续。` : run.waiting;
+    const errorNode = query('[data-error]'); if (errorNode) errorNode.textContent = run.error || '';
     const active = !run.stopped && !run.paused; const busy = active || run.starting;
-    const start = run.ui.querySelector('[data-start]'); start.textContent = run.paused ? '继续' : '开始'; start.disabled = busy;
-    run.ui.querySelector('[data-preview]').disabled = busy || run.paused; run.ui.querySelector('[data-pause]').disabled = !active; run.ui.querySelector('[data-stop]').disabled = run.stopped;
+    const start = query('[data-start]'); if (start) { start.textContent = run.paused ? '继续' : '开始'; start.disabled = busy; }
+    const preview = query('[data-preview]'); if (preview) preview.disabled = busy || run.paused;
+    const pauseButton = query('[data-pause]'); if (pauseButton) pauseButton.disabled = !active;
+    const stopButton = query('[data-stop]'); if (stopButton) stopButton.disabled = run.stopped;
+    const main = query('[data-panel]'); if (main) main.hidden = !['expanded', 'confirming-close'].includes(run.uiMode);
+    const launcher = query('[data-launcher]'); if (launcher) launcher.hidden = !['launcher', 'dragging'].includes(run.uiMode);
+    const dialog = query('[data-close-dialog]'); if (dialog) dialog.hidden = run.uiMode !== 'confirming-close';
+    const confirmButton = query('[data-confirm-close]'); if (confirmButton) confirmButton.disabled = run.closeDialog?.busy === true;
+    if (run.host && run.uiMode !== 'dragging') applyLauncherPosition();
   }
-  function panel() { if (document.getElementById('icc-host')) return; const host = document.createElement('div'); host.id = 'icc-host'; host.style.cssText = 'position:fixed;right:16px;bottom:16px;z-index:2147483647'; const root = host.attachShadow({ mode: 'open' }); root.innerHTML = `<style>main{font:13px system-ui;color:#111;background:#fff;border:1px solid #d1d5db;border-radius:8px;box-shadow:0 8px 28px #0003;width:340px;padding:14px}h2{font-size:14px;margin:0 0 10px}p{margin:7px 0}.muted{color:#666}.wait{color:#075985;min-height:1em}.pagination{color:#075985;min-height:1em}.error{color:#b42318;min-height:1em}.actions{display:flex;gap:6px;flex-wrap:wrap}button{border:0;border-radius:6px;padding:7px 10px;background:#2563eb;color:#fff}button[data-preview]{background:#0f766e}button[data-pause]{background:#d97706}button[data-stop]{background:#6b7280}button:disabled{opacity:.5}</style><main><h2>社交评论清理器</h2><p>状态：<b data-state>空闲</b></p><p class=muted data-stats></p><p class=pagination data-pagination></p><p class=wait data-wait></p><p class=error data-error></p><div class=actions><button data-start>开始</button><button data-pause>暂停</button><button data-stop>停止</button><button data-preview>预览模式</button></div></main>`; run.ui = root; document.documentElement.append(host); root.querySelector('[data-start]').onclick = () => start('run'); root.querySelector('[data-preview]').onclick = () => start('preview'); root.querySelector('[data-pause]').onclick = () => pause(); root.querySelector('[data-stop]').onclick = () => stop(); draw(); }
+  function panel(force = false) {
+    if (!force && isUiClosed()) return;
+    if (document.getElementById('icc-host')) return;
+    const host = document.createElement('div'); host.id = 'icc-host';
+    host.style.cssText = 'position:fixed;z-index:2147483647;isolation:isolate';
+    const root = host.attachShadow({ mode: 'open' });
+    root.innerHTML = `<style>
+      :host{all:initial}*{box-sizing:border-box}button{font:inherit;cursor:pointer}
+      .launcher-wrap{position:relative;width:36px;height:44px;display:flex;align-items:center}.launcher{width:36px;height:36px;padding:8px;border:1px solid #cbd5e1;border-radius:18px 0 0 18px;background:#eef0f2;color:#1f2937;box-shadow:0 4px 12px #0003;display:grid;place-items:center;transition:background .16s,box-shadow .16s}.launcher:hover,.launcher:focus-visible{background:#fff;box-shadow:0 6px 16px #0004;outline:2px solid #93c5fd;outline-offset:1px}.launcher[data-edge="left"]{border-radius:0 18px 18px 0}.launcher[data-edge="top"],.launcher[data-edge="bottom"]{border-radius:18px}.launcher svg{width:18px;height:18px;display:block}.launcher-label{display:none}.launcher-close{position:absolute;left:-7px;bottom:-1px;width:14px;height:14px;padding:0;border:1px solid #d1d5db;border-radius:50%;background:#fff;color:#374151;font-size:11px;line-height:11px;box-shadow:0 2px 7px #1113;opacity:0;pointer-events:none;transition:opacity .12s}.launcher-wrap:hover .launcher-close,.launcher-wrap:focus-within .launcher-close{opacity:1;pointer-events:auto}.launcher-close:focus-visible{outline:2px solid #2563eb;outline-offset:1px}
+      main{font:13px system-ui,-apple-system,sans-serif;color:#111;background:#fff;border:1px solid #d1d5db;border-radius:10px;box-shadow:0 8px 28px #0003;width:340px;padding:14px}header{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px}h2{font-size:14px;margin:0}header .tools{display:flex;gap:4px}header button{width:28px;height:26px;padding:0;border:0;border-radius:5px;background:#eef2ff;color:#374151}header button:hover,header button:focus-visible{background:#dbeafe;outline:2px solid #93c5fd}.close-dialog{position:absolute;right:14px;bottom:14px;width:312px;padding:12px;border:1px solid #f59e0b;border-radius:8px;background:#fffbeb;box-shadow:0 6px 22px #0003;color:#78350f}.close-dialog p{margin:0 0 10px;line-height:1.5}.dialog-actions{display:flex;justify-content:flex-end;gap:7px}.dialog-actions button{border:0;border-radius:6px;padding:7px 10px}.dialog-actions [data-cancel-close]{background:#fff;color:#92400e;border:1px solid #fbbf24}.dialog-actions [data-confirm-close]{background:#d97706;color:#fff}.close-dialog[hidden],main[hidden],.launcher[hidden]{display:none!important}p{margin:7px 0}.muted{color:#666}.wait{color:#075985;min-height:1em}.pagination{color:#075985;min-height:1em}.error{color:#b42318;min-height:1em;min-height:1em}.actions{display:flex;gap:6px;flex-wrap:wrap}.actions button{border:0;border-radius:6px;padding:7px 10px;background:#2563eb;color:#fff}.actions button[data-preview]{background:#0f766e}.actions button[data-pause]{background:#d97706}.actions button[data-stop]{background:#6b7280}.actions button:disabled{opacity:.5;cursor:not-allowed}
+    </style>
+    <div class="launcher-wrap"><button class="launcher" data-launcher data-edge="right" role="button" tabindex="0" aria-label="打开社交评论清理器"><svg viewBox="0 0 128 128" aria-hidden="true"><rect width="128" height="128" rx="28" fill="#2563eb"/><path d="M24 38c0-10 8-18 18-18h44c10 0 18 8 18 18v29c0 10-8 18-18 18H58L38 100V86c-8-2-14-9-14-19Z" fill="#fff"/><circle cx="50" cy="53" r="6" fill="#2563eb"/><circle cx="65" cy="53" r="6" fill="#2563eb"/><circle cx="80" cy="53" r="6" fill="#2563eb"/><path d="m77 104 28-28 7 7-28 28-13 3 3-10Z" fill="#fbbf24"/></svg></button><button class="launcher-close" data-launcher-close aria-label="关闭当前页面控件" title="关闭当前页面控件">×</button></div>
+    <main data-panel hidden><header><h2>社交评论清理器</h2><div class="tools"><button data-minimize aria-label="最小化面板" title="最小化">—</button><button data-close aria-label="关闭当前页面控件" title="关闭">×</button></div></header><p>状态：<b data-state>空闲</b></p><p class="muted" data-stats></p><p class="pagination" data-pagination></p><p class="wait" data-wait></p><p class="error" data-error></p><div class="actions"><button data-start aria-label="开始清理">开始</button><button data-pause aria-label="暂停任务">暂停</button><button data-stop aria-label="停止任务">停止</button><button data-preview aria-label="预览模式">预览模式</button></div></main>
+    <div class="close-dialog" data-close-dialog role="dialog" aria-modal="true" aria-labelledby="close-title" hidden><p id="close-title">当前任务正在运行，关闭后将暂停任务并退出当前页面控件。确定关闭吗？</p><div class="dialog-actions"><button data-cancel-close aria-label="取消关闭">取消</button><button data-confirm-close aria-label="关闭并暂停">关闭并暂停</button></div></div>`;
+    run.ui = root; run.host = host; document.documentElement.append(host);
+    const launcher = root.querySelector('[data-launcher]');
+    const launcherClose = root.querySelector('[data-launcher-close]');
+    launcher.addEventListener('click', (event) => { event.preventDefault(); event.stopPropagation(); if (run.drag?.ignoreNextClick) { run.drag.ignoreNextClick = false; return; } openPanel(); });
+    launcher.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openPanel(); } if (event.key === 'Escape') cancelLauncherDrag(); });
+    launcher.addEventListener('pointerdown', beginLauncherDrag);
+    launcher.addEventListener('pointermove', moveLauncherDrag);
+    launcher.addEventListener('pointerup', finishLauncherDrag);
+    launcher.addEventListener('pointercancel', cancelLauncherDrag);
+    launcherClose.addEventListener('click', (event) => { event.preventDefault(); event.stopPropagation(); requestClose(); });
+    root.addEventListener('keydown', (event) => { if (event.key === 'Escape' && run.uiMode === 'confirming-close') { event.preventDefault(); cancelClose(); } });
+    root.querySelector('[data-start]').onclick = () => start('run');
+    root.querySelector('[data-preview]').onclick = () => start('preview');
+    root.querySelector('[data-pause]').onclick = () => pause();
+    root.querySelector('[data-stop]').onclick = () => stop();
+    root.querySelector('[data-minimize]').onclick = () => minimizePanel();
+    root.querySelector('[data-close]').onclick = () => requestClose();
+    root.querySelector('[data-cancel-close]').onclick = () => cancelClose();
+    root.querySelector('[data-confirm-close]').onclick = () => confirmClose();
+    window.addEventListener('resize', keepLauncherInViewport);
+    window.addEventListener('blur', cancelLauncherDrag);
+    applyLauncherPosition(); draw();
+  }
+  function ensurePanel(force = false) { if (!run.ui || !run.host?.isConnected) panel(force); return Boolean(run.ui); }
+  function openPanel() { setUiClosed(false); if (!ensurePanel(true)) return; run.uiMode = panelState?.transition ? panelState.transition({ uiMode: run.uiMode }, 'open').uiMode : 'expanded'; draw(); }
+  function minimizePanel() { if (!run.ui) return; run.uiMode = 'launcher'; run.closeDialog = null; draw(); }
+  function closeControl() { setUiClosed(true); if (!run.host) return; run.uiMode = 'closed'; run.host.remove(); run.host = null; run.ui = null; run.closeDialog = null; }
+  function requestClose() {
+    if (!ensurePanel()) return;
+    if (run.pauseFailure) { run.uiMode = 'expanded'; run.closeDialog = null; draw(); return; }
+    const nextMode = panelState?.transition ? panelState.transition({ uiMode: run.uiMode }, 'request-close', { taskState: run.state }).uiMode : (panelState?.shouldConfirmClose?.(run.state) ? 'confirming-close' : 'closed');
+    run.uiMode = nextMode;
+    if (nextMode === 'closed') { closeControl(); return; }
+    run.closeDialog = { busy: false }; draw(); setTimeout(() => run.ui?.querySelector('[data-cancel-close]')?.focus(), 0);
+  }
+  function cancelClose() { if (!run.ui) return; run.uiMode = 'expanded'; run.closeDialog = null; draw(); }
+  async function confirmClose() {
+    if (!run.ui || run.closeDialog?.busy) return;
+    run.closeDialog = { busy: true }; draw();
+    const result = await pause();
+    if (!result?.ok) { run.closeDialog = null; run.uiMode = 'expanded'; run.error = result?.reason || '暂停任务失败，请使用“暂停”或“停止”按钮处理。'; draw(); return; }
+    run.uiMode = 'closed'; closeControl();
+  }
+  function applyLauncherPosition() {
+    if (!run.host || run.uiMode === 'expanded' || run.uiMode === 'confirming-close') { if (run.host && run.uiMode !== 'dragging') { run.host.style.right = '16px'; run.host.style.bottom = '16px'; run.host.style.left = 'auto'; run.host.style.top = 'auto'; } return; }
+    const launcher = run.ui.querySelector('[data-launcher]'); if (!launcher) return;
+    const rect = launcher.parentElement?.getBoundingClientRect?.() || launcher.getBoundingClientRect();
+    const position = panelState?.clampPosition ? panelState.clampPosition(run.launcherPosition, { viewportWidth: window.innerWidth, viewportHeight: window.innerHeight, launcherWidth: rect.width || 48, launcherHeight: rect.height || 48, safeMargin: 12 }) : run.launcherPosition;
+    run.launcherPosition = position;
+    launcher.dataset.edge = position.edge;
+    run.host.style.left = run.host.style.right = run.host.style.top = run.host.style.bottom = 'auto';
+    if (position.edge === 'left') { run.host.style.left = '0'; run.host.style.top = `${position.offset}px`; }
+    if (position.edge === 'right') { run.host.style.right = '0'; run.host.style.top = `${position.offset}px`; }
+    if (position.edge === 'top') { run.host.style.top = '12px'; run.host.style.left = `${position.offset}px`; }
+    if (position.edge === 'bottom') { run.host.style.bottom = '12px'; run.host.style.left = `${position.offset}px`; }
+  }
+  function beginLauncherDrag(event) {
+    if (event.pointerType === 'mouse' && event.button !== 0) return;
+    event.preventDefault(); event.stopPropagation();
+    const launcher = event.currentTarget; const rect = launcher.parentElement?.getBoundingClientRect?.() || launcher.getBoundingClientRect();
+    clearTimeout(run.drag?.timer);
+    run.drag = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, startAt: Date.now(), moved: false, timer: setTimeout(() => beginDragging(event), 500), target: launcher, previousPosition: { ...run.launcherPosition }, width: rect.width || 48, height: rect.height || 48, ignoreNextClick: false };
+  }
+  function beginDragging(event) {
+    if (!run.drag || run.drag.pointerId !== event.pointerId || run.uiMode === 'closed') return;
+    run.drag.moved = true; run.drag.ignoreNextClick = true; run.uiMode = 'dragging';
+    try { run.drag.target?.setPointerCapture?.(event.pointerId); } catch { /* 某些触控环境不支持捕获 */ }
+    document.documentElement.style.userSelect = 'none'; draw();
+  }
+  function moveLauncherDrag(event) {
+    if (!run.drag || run.drag.pointerId !== event.pointerId) return;
+    if (!run.drag.moved && panelState?.hasMoved?.(run.drag.startX, run.drag.startY, event.clientX, event.clientY, 6)) beginDragging(event);
+    if (run.uiMode !== 'dragging') return;
+    event.preventDefault(); event.stopPropagation();
+    const width = run.drag.width || 48; const height = run.drag.height || 48;
+    run.host.style.left = `${Math.max(12, Math.min(window.innerWidth - width - 12, event.clientX - width / 2))}px`;
+    run.host.style.top = `${Math.max(12, Math.min(window.innerHeight - height - 12, event.clientY - height / 2))}px`;
+    run.host.style.right = run.host.style.bottom = 'auto';
+  }
+  function finishLauncherDrag(event) {
+    if (!run.drag || run.drag.pointerId !== event.pointerId) return;
+    clearTimeout(run.drag.timer); const wasDragging = run.uiMode === 'dragging';
+    if (wasDragging) {
+      const rect = run.ui.querySelector('[data-launcher]')?.parentElement?.getBoundingClientRect?.() || run.ui.querySelector('[data-launcher]')?.getBoundingClientRect();
+      run.launcherPosition = panelState?.nearestEdgePosition?.({ centerX: rect.left + rect.width / 2, centerY: rect.top + rect.height / 2, viewportWidth: window.innerWidth, viewportHeight: window.innerHeight, launcherWidth: rect.width, launcherHeight: rect.height, safeMargin: 12 }) || run.launcherPosition;
+      run.uiMode = 'launcher'; run.drag = { ...run.drag, pointerId: null, timer: null, moved: false, previousPosition: { ...run.launcherPosition } }; document.documentElement.style.userSelect = ''; applyLauncherPosition(); draw();
+    } else { run.drag = { ...run.drag, pointerId: null, timer: null }; }
+    try { event.currentTarget?.releasePointerCapture?.(event.pointerId); } catch { /* ignore */ }
+  }
+  function cancelLauncherDrag() {
+    if (!run.drag?.pointerId && run.uiMode !== 'dragging') return;
+    clearTimeout(run.drag?.timer); run.launcherPosition = { ...(run.drag.previousPosition || run.launcherPosition) }; run.uiMode = 'launcher'; run.drag = { ...run.drag, pointerId: null, timer: null, moved: false, ignoreNextClick: true }; document.documentElement.style.userSelect = ''; applyLauncherPosition(); draw();
+  }
+  function keepLauncherInViewport() { if (run.uiMode === 'launcher') { applyLauncherPosition(); draw(); } }
   function commentIdFromUrl(value) { return String(value || '').match(/\/c\/(\d+)(?:\/|$)/)?.[1] || ''; }
   function replyUsername(container) {
     // 个人主页链接同时承载头像和用户名，排除帖子/评论链接后首个即为回复作者。
@@ -594,7 +715,8 @@
     clearRestTimer(); run.restTimer = setInterval(draw, 1000); draw();
   }
   async function pause() {
-    if (run.stopped || run.paused || run.starting) return;
+    if (run.stopped || run.paused || run.starting) return { ok: true, alreadyPaused: run.paused };
+    run.pauseFailure = false;
     run.paused = true;
     run.scanGeneration += 1;
     run.pagination?.cancel('自动加载已暂停。', 'paused');
@@ -603,7 +725,9 @@
     run.timer = null; clearRestTimer();
     if (run.rules?.targetUrl) await send({ type: 'ICC_CANCEL_REFRESH', targetUrl: run.rules.targetUrl });
     run.state = 'paused'; run.waiting = '已暂停，点击“开始”继续。';
-    await saveSession('paused', run.waiting); await releaseLock(); draw();
+    const saved = await saveSession('paused', run.waiting); await releaseLock();
+    if (!saved.ok) { run.pauseFailure = true; run.error = saved.reason; draw(); return { ok: false, reason: saved.reason }; }
+    draw(); return { ok: true };
   }
   async function stop(finalState = 'idle', reason = '') {
     run.stopped = true; run.paused = false;
@@ -713,7 +837,7 @@
     const defaults = { scanned: 0, matched: 0, deleted: 0, skipped: 0, loaded: 0, discovered: 0, topLevel: 0, replies: 0, batches: 0, newComments: 0 };
     run.sessionId = restored.sessionId; run.startedAt = restored.startedAt; run.mode = restored.mode; run.refresh = { ...run.refresh, ...restored.refresh };
     run.stats = { ...defaults, ...(restored.stats || {}) }; run.processedIds = new Set(restored.processedIds || []);
-    run.stopped = false; run.paused = false; run.error = ''; run.waiting = '';
+    run.stopped = false; run.paused = false; run.pauseFailure = false; run.error = ''; run.waiting = '';
     run.pace = new InstagramCommentPaceController(run.settings.pace);
     if (restored.pace?.state) run.pace.state = restored.pace.state;
     if (Number.isFinite(restored.pace?.consecutive)) run.pace.consecutive = restored.pace.consecutive;
@@ -729,7 +853,7 @@
     if (run.starting || (!run.stopped && !run.paused)) return;
     const restoring = Boolean(checkpoint);
     const resuming = !restoring && !run.stopped && run.paused;
-    run.starting = true; draw();
+    run.starting = true; run.pauseFailure = false; draw();
     try {
       run.settings = InstagramCommentPaceConfig.validateSettings((await chrome.storage.sync.get(KEY))[KEY] || {}); run.rules = InstagramCommentRules.prepareRules(run.settings);
       // Instagram 完成导航后可能还会短暂替换地址（例如重定向或 SPA 路由更新）。
@@ -781,7 +905,8 @@
     if (message?.type === 'ICC_PAUSE') { pause(); reply({ ok: true }); return false; }
     if (message?.type === 'ICC_STOP') { stop(); reply({ ok: true }); return false; }
     if (!['ICC_START', 'ICC_PREVIEW'].includes(message?.type)) return false;
-    start(message.type === 'ICC_START' ? 'run' : 'preview'); reply({ ok: true }); return false;
+    // 配置页启动时才展开面板；页面刷新自动恢复保持边缘 Logo，避免遮挡评论区。
+    openPanel(); start(message.type === 'ICC_START' ? 'run' : 'preview'); reply({ ok: true }); return false;
   });
-  if (InstagramCommentRules.normalizeTargetUrl(location.href)) { panel(); restorePending().catch((error) => { run.error = error.message; run.state = 'paused'; draw(); }); }
+  if (InstagramCommentRules.normalizeTargetUrl(location.href)) { if (!isUiClosed()) panel(); restorePending().catch((error) => { run.error = error.message; run.state = 'paused'; draw(); }); }
 })();
