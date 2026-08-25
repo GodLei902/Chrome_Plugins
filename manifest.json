@@ -9,7 +9,7 @@
     "48": "assets/icons/icon-48.png",
     "128": "assets/icons/icon-128.png"
   },
-  "permissions": ["storage", "tabs", "debugger"],
+  "permissions": ["storage", "tabs", "debugger", "alarms"],
   "host_permissions": [
     "https://www.instagram.com/*",
     "https://instagram.com/*"
@@ -34,7 +34,7 @@
         "https://www.instagram.com/*",
         "https://instagram.com/*"
       ],
-      "js": ["src/shared/action-pace-config.js", "src/shared/delay-generator.js", "src/shared/backoff.js", "src/shared/action-pace-controller.js", "src/content/rules.js", "src/content/comment-surface-stability.js", "src/content/comment-pagination-surface.js", "src/content/comment-pagination-controls.js", "src/content/comment-pagination-loader.js", "src/content/social-comment-cleaner.js"],
+      "js": ["src/shared/delay-generator.js", "src/shared/scheduled-rest.js", "src/shared/task-session.js", "src/shared/action-pace-config.js", "src/shared/backoff.js", "src/shared/action-pace-controller.js", "src/content/rules.js", "src/content/comment-surface-stability.js", "src/content/comment-pagination-surface.js", "src/content/comment-pagination-controls.js", "src/content/comment-pagination-loader.js", "src/content/social-comment-cleaner.js"],
       "run_at": "document_idle"
     }
   ]

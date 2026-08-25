@@ -1,9 +1,9 @@
 (function () {
   'use strict';
   const KEY = 'socialCommentCleanerSettings';
-  const TEXT = { idle: '空闲', 'waiting-surface': '等待评论区', expanding: '展开中', stabilizing: '等待稳定', scanning: '扫描中', loading: '加载下一批', 'waiting-load': '等待下一批', running: '运行中', 'waiting-delete': '确认删除', 'cooling-down': '休息中', completed: '已完成', paused: '已暂停', error: '错误' };
+  const TEXT = { idle: '空闲', 'waiting-surface': '等待评论区', expanding: '展开中', stabilizing: '等待稳定', scanning: '扫描中', loading: '加载下一批', 'waiting-load': '等待下一批', running: '运行中', 'waiting-delete': '确认删除', 'cooling-down': '当前轮次休息', 'scheduled-rest': '等待下一轮', completed: '已完成', paused: '已暂停', error: '错误' };
   const stabilityDefaults = globalThis.InstagramCommentSurfaceStability?.DEFAULTS || { mutationDebounceMs: 250, rafConfirmCount: 2, stablePasses: 2, initialReadyTimeoutMs: 15000, postDeleteSettleTimeoutMs: 10000, emptyRescanAttempts: 3 };
-  const run = { stopped: true, paused: false, starting: false, mode: 'preview', state: 'idle', stats: { scanned: 0, matched: 0, deleted: 0, skipped: 0, loaded: 0, discovered: 0, topLevel: 0, replies: 0, batches: 0, newComments: 0 }, candidates: [], timer: null, lockTimer: null, waiting: '', error: '', seenIds: new Set(), seenCommentIds: new Set(), seenReplyIds: new Set(), matchedIds: new Set(), skippedIds: new Set(), processedIds: new Set(), lastScanIds: new Set(), scanInFlight: false, scanGeneration: 0, pagination: null, stability: { surface: null, surfaceGeneration: 0, mutationVersion: 0, lastMutationAt: 0, observer: null, discoveryObserver: null, pending: new Set(), discoveryCount: 0, stage: '', lastSnapshot: '' } };
+  const run = { stopped: true, paused: false, starting: false, mode: 'preview', state: 'idle', sessionId: '', startedAt: 0, stats: { scanned: 0, matched: 0, deleted: 0, skipped: 0, loaded: 0, discovered: 0, topLevel: 0, replies: 0, batches: 0, newComments: 0 }, candidates: [], timer: null, restTimer: null, lockTimer: null, waiting: '', error: '', refresh: { count: 0, restStartedAt: 0, restDelayMs: 0, nextRefreshAt: 0, lastReason: '' }, seenIds: new Set(), seenCommentIds: new Set(), seenReplyIds: new Set(), matchedIds: new Set(), skippedIds: new Set(), processedIds: new Set(), lastScanIds: new Set(), scanInFlight: false, scanGeneration: 0, pagination: null, stability: { surface: null, surfaceGeneration: 0, mutationVersion: 0, lastMutationAt: 0, observer: null, discoveryObserver: null, pending: new Set(), discoveryCount: 0, stage: '', lastSnapshot: '' } };
   function send(message) {
     // 扩展热重载后，旧页面脚本仍可能运行在已失效的上下文中；此时
     // sendMessage 会同步抛错，不能只依赖 Promise.catch 捕获。
@@ -73,7 +73,8 @@
     run.ui.querySelector('[data-pagination]').textContent = paginationState
       ? `加载轮次 ${paginationState.batchIndex} · 本轮新增 ${paginationState.newIds} · 无新增 ${paginationState.noGrowthAttempts}/${run.settings?.pagination?.noGrowthAttempts || 0}`
       : '连续加载已启用';
-    run.ui.querySelector('[data-wait]').textContent = run.waiting;
+    const restLeft = run.state === 'scheduled-rest' && run.refresh.nextRefreshAt ? Math.max(0, run.refresh.nextRefreshAt - Date.now()) : 0;
+    run.ui.querySelector('[data-wait]').textContent = restLeft ? `本轮已完成，${Math.ceil(restLeft / 60000)} 分钟后刷新并继续。` : run.waiting;
     run.ui.querySelector('[data-error]').textContent = run.error || '';
     const active = !run.stopped && !run.paused; const busy = active || run.starting;
     const start = run.ui.querySelector('[data-start]'); start.textContent = run.paused ? '继续' : '开始'; start.disabled = busy;
@@ -559,7 +560,39 @@
     if (!(await waitForDeleted(candidate))) throw new Error('未确认回复已删除，已暂停。');
     return true;
   }
+  function clearRestTimer() { clearInterval(run.restTimer); run.restTimer = null; }
+  function checkpoint(status = run.state, reason = run.error || '') {
+    return SocialCommentTaskSession.create({
+      sessionId: run.sessionId,
+      target: { platform: 'instagram', normalizedId: run.rules?.targetUrl || '', url: run.rules?.targetUrl || '' },
+      mode: run.mode,
+      status,
+      startedAt: run.startedAt,
+      stats: run.stats,
+      processedIds: [...run.processedIds],
+      refresh: run.refresh,
+      pace: { state: run.pace?.state || 'NORMAL', consecutive: run.pace?.consecutive || 0, failures: run.pace?.failures || 0 },
+      reason,
+    });
+  }
+  async function saveSession(status = run.state, reason = '') {
+    if (!run.rules?.targetUrl || !run.sessionId) return { ok: false, reason: '当前没有可保存的任务会话。' };
+    const snapshot = checkpoint(status, reason);
+    const response = await send({ type: 'ICC_SAVE_SESSION', targetUrl: run.rules.targetUrl, snapshot });
+    return response?.ok ? response : { ok: false, reason: response?.reason || '任务检查点保存失败。' };
+  }
   async function releaseLock() { clearInterval(run.lockTimer); run.lockTimer = null; if (run.rules) await send({ type: 'ICC_RELEASE_LOCK', targetUrl: run.rules.targetUrl }); }
+  async function enterScheduledRest(reason = '本轮已完成，等待下一轮刷新。') {
+    if (run.mode === 'preview' || run.stopped || run.paused || run.state === 'scheduled-rest') return;
+    const delayMs = SocialCommentScheduledRest.generate(run.settings.pace.refreshRest);
+    run.refresh = { ...run.refresh, count: run.refresh.count + 1, restStartedAt: Date.now(), restDelayMs: delayMs, nextRefreshAt: Date.now() + delayMs, lastReason: reason };
+    run.state = 'scheduled-rest'; run.waiting = reason; run.error = ''; draw();
+    const saved = await saveSession('scheduled-rest', reason);
+    if (!saved.ok) { run.error = saved.reason; return pause(); }
+    const scheduled = await send({ type: 'ICC_SCHEDULE_REFRESH', targetUrl: run.rules.targetUrl, nextRefreshAt: run.refresh.nextRefreshAt, sessionId: run.sessionId });
+    if (!scheduled.ok) { run.error = scheduled.reason || '无法安排下一轮刷新。'; return pause(); }
+    clearRestTimer(); run.restTimer = setInterval(draw, 1000); draw();
+  }
   async function pause() {
     if (run.stopped || run.paused || run.starting) return;
     run.paused = true;
@@ -567,8 +600,10 @@
     run.pagination?.cancel('自动加载已暂停。', 'paused');
     cancelStabilityWait(); disconnectStabilityObservers();
     if (run.waitResolve) finishWait(false); else clearTimeout(run.timer);
-    run.timer = null; run.state = 'paused'; run.waiting = '已暂停，点击“开始”继续。';
-    await releaseLock(); draw();
+    run.timer = null; clearRestTimer();
+    if (run.rules?.targetUrl) await send({ type: 'ICC_CANCEL_REFRESH', targetUrl: run.rules.targetUrl });
+    run.state = 'paused'; run.waiting = '已暂停，点击“开始”继续。';
+    await saveSession('paused', run.waiting); await releaseLock(); draw();
   }
   async function stop(finalState = 'idle', reason = '') {
     run.stopped = true; run.paused = false;
@@ -576,8 +611,12 @@
     run.pagination?.cancel('自动加载已停止。', 'cancelled');
     cancelStabilityWait(); disconnectStabilityObservers();
     if (run.waitResolve) finishWait(false); else clearTimeout(run.timer);
-    run.timer = null; run.state = finalState; run.waiting = reason || (finalState === 'completed' ? run.waiting : '');
+    run.timer = null; clearRestTimer();
+    if (run.rules?.targetUrl) await send({ type: 'ICC_CANCEL_REFRESH', targetUrl: run.rules.targetUrl });
+    run.state = finalState; run.waiting = reason || (finalState === 'completed' ? run.waiting : '');
     run.candidates = [];
+    if (finalState === 'paused') await saveSession('paused', reason || run.error);
+    else if (run.rules?.targetUrl) await send({ type: 'ICC_CLEAR_SESSION', targetUrl: run.rules.targetUrl });
     await releaseLock(); draw();
   }
   async function acquire() { while (!run.stopped && !run.paused) { const result = await send({ type: 'ICC_RATE_ACQUIRE', limits: run.settings.pace.rateLimit }); if (result.ok) return true; if (!Number.isFinite(result.retryAfterMs)) throw new Error(result.reason || '无法申请操作额度。'); if (!(await wait(result.retryAfterMs, `全局操作上限已满，等待 ${Math.ceil(result.retryAfterMs / 1000)} 秒...`))) return false; } return false; }
@@ -612,7 +651,7 @@
     let first = true;
     let emptyRescanAttempts = 0;
     while (!run.stopped && !run.paused) {
-      if (run.settings.sessionMaxMinutes && Date.now() - run.startedAt >= run.settings.sessionMaxMinutes * 60000) return stop('paused', '已达到本次任务运行时间上限。');
+      if (run.settings.sessionMaxMinutes > 0 && Date.now() - run.startedAt >= run.settings.sessionMaxMinutes * 60000) return stop('paused', '已达到本次任务运行时间上限。');
       if (run.settings.sessionLimit !== 'unlimited' && run.stats.deleted >= run.settings.sessionLimit) return stop('paused', '已达到本次任务删除数量上限。');
       if (run.candidates.length) {
         const candidate = run.candidates.shift();
@@ -622,6 +661,8 @@
           first = false; if (!(await acquire())) return;
           run.state = 'running'; draw();
           await remove(candidate); run.processedIds.add(candidate.id); run.stats.deleted += 1;
+          const checkpointSaved = await saveSession('running');
+          if (!checkpointSaved.ok) throw new Error(checkpointSaved.reason);
           // 目标节点消失后仍可能处于旧容器卸载、新容器挂载的中间态；以稳定快照作为下一轮边界。
           const settled = await waitForStableSurface({ timeoutMs: stabilityDefaults.postDeleteSettleTimeoutMs, requireData: false, reason: '正在等待删除后的评论区稳定...' });
           if (!settled) {
@@ -647,9 +688,9 @@
       // 分页器已经确认到底且稳定空结果重扫已完成，此时不再进入批次休息，直接结束。
       const paginationSnapshot = run.pagination?.getSnapshot?.();
       if (paginationSnapshot?.phase === 'completed') {
-        return stop('completed', `已完成：${paginationSnapshot.terminalReason || '当前页面没有更多可加载评论。'}`);
+        return enterScheduledRest(`本轮已完成：${paginationSnapshot.terminalReason || '当前页面没有更多可加载评论。'}`);
       }
-      if (!run.pagination) return stop('completed', '已完成：当前稳定评论容器中没有待处理回复。');
+      if (!run.pagination) return enterScheduledRest('本轮已完成：当前稳定评论容器中没有待处理回复。');
       const currentBatch = run.pagination.getSnapshot().batchIndex;
       if (!(await waitBetweenBatches(currentBatch))) return;
       run.state = 'loading'; run.waiting = '正在准备加载下一批评论...'; draw();
@@ -657,18 +698,37 @@
       run.stats.batches = batch.batchIndex;
       run.stats.newComments = batch.newIds || 0;
       if (run.paused || run.stopped || batch.status === 'paused' || batch.status === 'cancelled') return;
-      if (batch.status === 'completed' && !batch.newIds) return stop('completed', `已完成：${batch.terminalReason || '当前页面没有更多可加载评论。'}`);
+      if (batch.status === 'completed' && !batch.newIds) return enterScheduledRest(`本轮已完成：${batch.terminalReason || '当前页面没有更多可加载评论。'}`);
       emptyRescanAttempts = 0;
       await scan();
       // 达到最大批次时本轮可能同时带回新增评论；扫描完成后回到循环排空候选，再停止。
       if (batch.status === 'completed' && !run.candidates.length) {
-        return stop('completed', `已完成：${batch.terminalReason || '当前页面没有更多可加载评论。'}`);
+        return enterScheduledRest(`本轮已完成：${batch.terminalReason || '当前页面没有更多可加载评论。'}`);
       }
     }
   }
-  async function start(mode) {
+  function restoreCheckpoint(snapshot) {
+    const restored = SocialCommentTaskSession.normalize(snapshot);
+    if (!restored) throw new Error('任务检查点无效，无法恢复。');
+    const defaults = { scanned: 0, matched: 0, deleted: 0, skipped: 0, loaded: 0, discovered: 0, topLevel: 0, replies: 0, batches: 0, newComments: 0 };
+    run.sessionId = restored.sessionId; run.startedAt = restored.startedAt; run.mode = restored.mode; run.refresh = { ...run.refresh, ...restored.refresh };
+    run.stats = { ...defaults, ...(restored.stats || {}) }; run.processedIds = new Set(restored.processedIds || []);
+    run.stopped = false; run.paused = false; run.error = ''; run.waiting = '';
+    run.pace = new InstagramCommentPaceController(run.settings.pace);
+    if (restored.pace?.state) run.pace.state = restored.pace.state;
+    if (Number.isFinite(restored.pace?.consecutive)) run.pace.consecutive = restored.pace.consecutive;
+    if (Number.isFinite(restored.pace?.failures)) run.pace.failures = restored.pace.failures;
+    run.state = restored.status === 'scheduled-rest' && restored.refresh.nextRefreshAt > Date.now() ? 'scheduled-rest' : 'idle';
+  }
+  async function restoreScheduledRest() {
+    const scheduled = await send({ type: 'ICC_SCHEDULE_REFRESH', targetUrl: run.rules.targetUrl, nextRefreshAt: run.refresh.nextRefreshAt, sessionId: run.sessionId });
+    if (!scheduled.ok) throw new Error(scheduled.reason || '无法恢复下一轮刷新。');
+    clearRestTimer(); run.restTimer = setInterval(draw, 1000); draw();
+  }
+  async function start(mode, checkpoint = null) {
     if (run.starting || (!run.stopped && !run.paused)) return;
-    const resuming = !run.stopped && run.paused;
+    const restoring = Boolean(checkpoint);
+    const resuming = !restoring && !run.stopped && run.paused;
     run.starting = true; draw();
     try {
       run.settings = InstagramCommentPaceConfig.validateSettings((await chrome.storage.sync.get(KEY))[KEY] || {}); run.rules = InstagramCommentRules.prepareRules(run.settings);
@@ -679,23 +739,43 @@
       }
       if (InstagramCommentRules.normalizeTargetUrl(location.href) !== run.rules.targetUrl) throw new Error('当前 URL 与设置的目标帖子不匹配。');
       const lock = await send({ type: 'ICC_ACQUIRE_LOCK', targetUrl: run.rules.targetUrl }); if (!lock.ok) throw new Error(lock.reason);
-      if (!resuming) {
+      if (restoring) {
+        resetStability(); restoreCheckpoint(checkpoint); run.pagination = createPaginationLoader();
+      } else if (!resuming) {
         resetStability();
-        run.stopped = false; run.mode = mode; run.startedAt = Date.now(); run.seenIds = new Set(); run.seenCommentIds = new Set(); run.seenReplyIds = new Set(); run.matchedIds = new Set(); run.skippedIds = new Set(); run.processedIds = new Set(); run.lastScanIds = new Set(); run.stats = { scanned: 0, matched: 0, deleted: 0, skipped: 0, loaded: 0, discovered: 0, topLevel: 0, replies: 0, batches: 0, newComments: 0 }; run.pace = new InstagramCommentPaceController(run.settings.pace); run.pagination = createPaginationLoader();
+        run.stopped = false; run.mode = mode; run.sessionId = SocialCommentTaskSession.createId(); run.startedAt = Date.now(); run.refresh = { count: 0, restStartedAt: 0, restDelayMs: 0, nextRefreshAt: 0, lastReason: '' }; run.seenIds = new Set(); run.seenCommentIds = new Set(); run.seenReplyIds = new Set(); run.matchedIds = new Set(); run.skippedIds = new Set(); run.processedIds = new Set(); run.lastScanIds = new Set(); run.stats = { scanned: 0, matched: 0, deleted: 0, skipped: 0, loaded: 0, discovered: 0, topLevel: 0, replies: 0, batches: 0, newComments: 0 }; run.pace = new InstagramCommentPaceController(run.settings.pace); run.pagination = createPaginationLoader();
       } else {
         resetStability();
         run.paused = false; run.error = ''; run.waiting = ''; run.state = 'idle'; run.pagination = createPaginationLoader();
         if (run.pace?.state === 'REST') run.pace.restComplete();
       }
       run.starting = false; run.lockTimer = setInterval(() => send({ type: 'ICC_RENEW_LOCK', targetUrl: run.rules.targetUrl }), 30000); draw();
+      if (run.state === 'scheduled-rest' || (resuming && run.refresh.nextRefreshAt > Date.now())) {
+        run.state = 'scheduled-rest'; await saveSession('scheduled-rest', '本轮已完成，等待下一轮刷新。'); await restoreScheduledRest(); return;
+      }
+      if (resuming && run.refresh.nextRefreshAt && run.refresh.nextRefreshAt <= Date.now()) {
+        run.state = 'scheduled-rest'; run.refresh.nextRefreshAt = Date.now(); await saveSession('scheduled-rest', '休息时间已到，准备刷新目标页面。'); await restoreScheduledRest(); return;
+      }
+      const startedSaved = await saveSession('running');
+      if (!startedSaved.ok) throw new Error(startedSaved.reason);
       // 恢复时同样重扫，避免沿用暂停前已被 Instagram 重绘的候选元素。
       await scan();
       await process();
     } catch (error) {
       run.starting = false;
-      if (!resuming) run.stopped = true;
+      if (!resuming && !restoring) run.stopped = true;
       run.paused = true; run.state = 'paused'; run.error = error.message; await releaseLock(); draw();
+      if (run.sessionId && run.rules?.targetUrl) await saveSession('paused', error.message);
     }
+  }
+  async function restorePending() {
+    const targetUrl = InstagramCommentRules.normalizeTargetUrl(location.href);
+    if (!targetUrl) return;
+    const response = await send({ type: 'ICC_GET_SESSION', targetUrl });
+    const snapshot = response?.snapshot;
+    // 页面因浏览器崩溃或手动刷新重建时，活动会话也应从最近检查点继续；暂停/停止状态永不自动恢复。
+    if (!snapshot || !['running', 'scheduled-rest', 'refreshing'].includes(snapshot.status)) return;
+    await start('run', snapshot);
   }
   chrome.runtime.onMessage.addListener((message, sender, reply) => {
     if (message?.type === 'ICC_PAUSE') { pause(); reply({ ok: true }); return false; }
@@ -703,5 +783,5 @@
     if (!['ICC_START', 'ICC_PREVIEW'].includes(message?.type)) return false;
     start(message.type === 'ICC_START' ? 'run' : 'preview'); reply({ ok: true }); return false;
   });
-  if (InstagramCommentRules.normalizeTargetUrl(location.href)) panel();
+  if (InstagramCommentRules.normalizeTargetUrl(location.href)) { panel(); restorePending().catch((error) => { run.error = error.message; run.state = 'paused'; draw(); }); }
 })();

@@ -1,8 +1,9 @@
-importScripts('../shared/rate-limiter.js');
+importScripts('../shared/rate-limiter.js', '../shared/task-session.js');
 
 const SNAPSHOT_PREFIX = 'instagramCommentCleanerSession:';
 const LOCK_PREFIX = 'instagramCommentCleanerLock:';
 const RATE_LIMIT_KEY = 'instagramCommentCleanerRateLimit';
+const REFRESH_ALARM_PREFIX = 'socialTaskRefresh:instagram:';
 const LEASE_MS = 90 * 1000;
 const DEBUGGER_VERSION = '1.3';
 
@@ -15,6 +16,21 @@ function normalizeTargetUrl(value) {
   } catch {
     return '';
   }
+}
+
+function refreshAlarmName(targetUrl) { return `${REFRESH_ALARM_PREFIX}${encodeURIComponent(targetUrl)}`; }
+function snapshotKey(targetUrl) { return `${SNAPSHOT_PREFIX}${targetUrl}`; }
+function clearRefreshAlarm(targetUrl) { return chrome.alarms.clear(refreshAlarmName(targetUrl)); }
+function scheduleRefreshAlarm(targetUrl, when) {
+  return chrome.alarms.create(refreshAlarmName(targetUrl), { when: Math.max(Date.now() + 1000, Number(when) || Date.now() + 1000) });
+}
+function tabsReload(tabId) {
+  return new Promise((resolve, reject) => {
+    chrome.tabs.reload(tabId, { bypassCache: true }, () => {
+      const error = chrome.runtime.lastError;
+      if (error) reject(new Error(error.message)); else resolve();
+    });
+  });
 }
 
 async function waitForTabLoad(tabId, timeoutMs = 15000) {
@@ -116,6 +132,36 @@ chrome.runtime.onInstalled.addListener(() => {
   console.info('[社交评论清理器] installed');
 });
 
+chrome.alarms?.onAlarm.addListener((alarm) => {
+  if (!alarm.name.startsWith(REFRESH_ALARM_PREFIX)) return;
+  (async () => {
+    const targetUrl = decodeURIComponent(alarm.name.slice(REFRESH_ALARM_PREFIX.length));
+    const key = snapshotKey(targetUrl);
+    const stored = (await chrome.storage.local.get(key))[key];
+    const snapshot = globalThis.SocialCommentTaskSession?.normalize(stored) || stored;
+    if (!snapshot || !['scheduled-rest', 'refreshing'].includes(snapshot.status)) return;
+    if (snapshot.status === 'scheduled-rest' && Number(snapshot.refresh?.nextRefreshAt) > Date.now()) {
+      await scheduleRefreshAlarm(targetUrl, snapshot.refresh.nextRefreshAt);
+      return;
+    }
+    const tabs = await chrome.tabs.query({});
+    const tab = tabs.find((candidate) => normalizeTargetUrl(candidate.url || '') === targetUrl);
+    if (!tab?.id) {
+      await chrome.storage.local.set({ [key]: { ...snapshot, status: 'paused', reason: '目标标签页已关闭，自动刷新已暂停。', lastCheckpointAt: Date.now() } });
+      await clearRefreshAlarm(targetUrl);
+      return;
+    }
+    await chrome.storage.local.set({ [key]: { ...snapshot, status: 'refreshing', reason: '本轮休息结束，正在刷新目标页面。', lastCheckpointAt: Date.now() } });
+    await clearRefreshAlarm(targetUrl);
+    try {
+      await tabsReload(tab.id);
+      await waitForTabLoad(tab.id);
+    } catch (error) {
+      await chrome.storage.local.set({ [key]: { ...snapshot, status: 'paused', reason: `自动刷新失败：${error.message || '未知错误'}`, lastCheckpointAt: Date.now() } });
+    }
+  })().catch((error) => console.warn('[社交评论清理器] 自动刷新失败', error));
+});
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === 'ICC_LAUNCH') {
     (async () => {
@@ -136,6 +182,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === 'ICC_PING') {
     sendResponse({ ok: true });
     return false;
+  }
+  if (message?.type === 'ICC_SCHEDULE_REFRESH' || message?.type === 'ICC_CANCEL_REFRESH') {
+    (async () => {
+      const targetUrl = normalizeTargetUrl(message.targetUrl);
+      if (!targetUrl) return sendResponse({ ok: false, reason: '目标 URL 无效。' });
+      if (message.type === 'ICC_CANCEL_REFRESH') {
+        await clearRefreshAlarm(targetUrl);
+        return sendResponse({ ok: true });
+      }
+      await scheduleRefreshAlarm(targetUrl, message.nextRefreshAt);
+      const lockKey = `${LOCK_PREFIX}${targetUrl}`;
+      const currentLock = (await chrome.storage.local.get(lockKey))[lockKey];
+      if (currentLock?.tabId === sender.tab?.id) await chrome.storage.local.set({ [lockKey]: { ...currentLock, expiresAt: Math.max(currentLock.expiresAt || 0, Number(message.nextRefreshAt) + LEASE_MS) } });
+      return sendResponse({ ok: true, nextRefreshAt: Number(message.nextRefreshAt) });
+    })().catch((error) => sendResponse({ ok: false, reason: error.message }));
+    return true;
   }
   if (message?.type === 'ICC_HOVER_COMMENT') {
     (async () => {
@@ -176,10 +238,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       await chrome.storage.local.set({ [RATE_LIMIT_KEY]: limiter.snapshot() });
       return sendResponse(result);
     }
-    const snapshotKey = `${SNAPSHOT_PREFIX}${message.targetUrl}`;
-    if (message.type === 'ICC_SAVE_SESSION') await chrome.storage.local.set({ [snapshotKey]: message.snapshot });
-    if (message.type === 'ICC_GET_SESSION') return sendResponse({ ok: true, snapshot: (await chrome.storage.local.get(snapshotKey))[snapshotKey] || null });
-    if (message.type === 'ICC_CLEAR_SESSION') await chrome.storage.local.remove(snapshotKey);
+    const sessionKey = snapshotKey(message.targetUrl);
+    if (message.type === 'ICC_SAVE_SESSION') await chrome.storage.local.set({ [sessionKey]: { ...message.snapshot, ownerTabId: sender.tab?.id || message.snapshot?.ownerTabId || null } });
+    if (message.type === 'ICC_GET_SESSION') return sendResponse({ ok: true, snapshot: (await chrome.storage.local.get(sessionKey))[sessionKey] || null });
+    if (message.type === 'ICC_CLEAR_SESSION') { await chrome.storage.local.remove(sessionKey); await clearRefreshAlarm(message.targetUrl); }
     sendResponse({ ok: false, reason: `不支持的消息类型：${message.type}` });
   })().catch((error) => sendResponse({ ok: false, reason: error.message }));
   return true;

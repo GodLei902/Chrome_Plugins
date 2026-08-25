@@ -23,5 +23,8 @@
     const seconds = config.distribution === 'gamma' ? gammaSeconds(config, random) : logNormalSeconds(config, random);
     return Math.round(seconds * 1000);
   }
-  global.InstagramCommentDelay = { normalRandom, logNormalSeconds, gammaSeconds, generateDelayMs };
+  const api = { normalRandom, logNormalSeconds, gammaSeconds, generateDelayMs };
+  // 通用核心使用平台无关名称，旧 Instagram 调用保留兼容别名。
+  global.DelayGenerator = api;
+  global.InstagramCommentDelay = api;
 })(globalThis);

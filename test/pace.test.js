@@ -4,13 +4,17 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const context = { globalThis: {}, Math, JSON, Number, Array, Set, String, Object, setTimeout, clearTimeout };
 context.globalThis = context;
-for (const file of ['src/shared/action-pace-config.js', 'src/shared/delay-generator.js', 'src/shared/backoff.js', 'src/shared/action-pace-controller.js', 'src/shared/rate-limiter.js', 'src/content/comment-surface-stability.js', 'src/content/comment-pagination-surface.js', 'src/content/comment-pagination-controls.js', 'src/content/comment-pagination-loader.js']) vm.runInNewContext(fs.readFileSync(file, 'utf8'), context);
+for (const file of ['src/shared/delay-generator.js', 'src/shared/scheduled-rest.js', 'src/shared/task-session.js', 'src/shared/action-pace-config.js', 'src/shared/backoff.js', 'src/shared/action-pace-controller.js', 'src/shared/rate-limiter.js', 'src/content/comment-surface-stability.js', 'src/content/comment-pagination-surface.js', 'src/content/comment-pagination-controls.js', 'src/content/comment-pagination-loader.js']) vm.runInNewContext(fs.readFileSync(file, 'utf8'), context);
 test('延迟始终在配置范围内', () => { const config = { distribution: 'log-normal', meanSeconds: 18, minSeconds: 12, maxSeconds: 30, variability: 'high' }; for (let i = 0; i < 100; i += 1) { const value = context.InstagramCommentDelay.generateDelayMs(config); assert.ok(value >= 12000 && value <= 30000); } });
 test('状态机在连续上限后休息并重置', () => { const pace = new context.InstagramCommentPaceController({ maxConsecutive: 2, backoff: { maxFailures: 3 } }); pace.begin(); assert.equal(pace.success(), 'NORMAL'); pace.begin(); assert.equal(pace.success(), 'REST'); pace.restComplete(); assert.equal(pace.consecutive, 0); assert.equal(pace.state, 'NORMAL'); });
 test('限频窗口不超额且返回等待时间', () => { const limiter = new context.InstagramCommentRateLimiter(); assert.equal(limiter.acquire({ perMinute: 2, perHour: 3 }, 1000).ok, true); assert.equal(limiter.acquire({ perMinute: 2, perHour: 3 }, 1001).ok, true); const blocked = limiter.acquire({ perMinute: 2, perHour: 3 }, 1002); assert.equal(blocked.ok, false); assert.ok(blocked.retryAfterMs > 0); });
 test('旧设置迁移到节奏配置', () => { const settings = context.InstagramCommentPaceConfig.normalizeSettings({ deleteDelayMin: 10, deleteDelayMax: 20, cooldownMin: 40, cooldownMax: 80, batchLimit: 4 }); assert.equal(settings.pace.operation.meanSeconds, 15); assert.equal(settings.pace.rest.meanSeconds, 60); assert.equal(settings.pace.maxConsecutive, 4); });
 test('节奏默认值使用新的批次与休息边界', () => { const settings = context.InstagramCommentPaceConfig.normalizeSettings({}); assert.equal(settings.pace.maxConsecutive, 20); assert.equal(settings.pace.rest.meanSeconds, 60); assert.equal(settings.pace.rest.minSeconds, 45); assert.equal(settings.pace.rest.maxSeconds, 90); assert.equal(settings.sessionLimit, 100); });
 test('删除前等待默认值使用 5 至 25 秒范围', () => { const settings = context.InstagramCommentPaceConfig.normalizeSettings({}); assert.equal(settings.pace.deleteDialogDelay.meanSeconds, 20); assert.equal(settings.pace.deleteDialogDelay.minSeconds, 5); assert.equal(settings.pace.deleteDialogDelay.maxSeconds, 25); });
+test('默认启用持续运行并使用 10 至 60 分钟刷新休息', () => { const settings = context.InstagramCommentPaceConfig.normalizeSettings({}); assert.equal(settings.sessionMaxMinutes, 0); assert.equal(settings.pace.refreshRest.minSeconds, 600); assert.equal(settings.pace.refreshRest.maxSeconds, 3600); assert.equal(settings.pace.refreshRest.meanSeconds, 1800); });
+test('刷新休息配置拒绝超出 10 至 60 分钟的输入', () => { assert.throws(() => context.InstagramCommentPaceConfig.validateSettings({ pace: { refreshRest: { minSeconds: 300, meanSeconds: 1800, maxSeconds: 3600 } } }), /10～60/); assert.throws(() => context.InstagramCommentPaceConfig.validateSettings({ pace: { refreshRest: { minSeconds: 600, meanSeconds: 3600, maxSeconds: 3601 } } }), /10～60/); });
+test('刷新休息随机值始终落在配置范围内', () => { const config = { minSeconds: 600, meanSeconds: 1800, maxSeconds: 3600, variability: 'high' }; for (let i = 0; i < 100; i += 1) { const value = context.SocialCommentScheduledRest.generate(config); assert.ok(value >= 600000 && value <= 3600000); } });
+test('任务检查点保留会话、已处理 ID 和刷新时间', () => { const snapshot = context.SocialCommentTaskSession.create({ targetUrl: 'https://www.instagram.com/p/abc/', sessionId: 'session-test', status: 'scheduled-rest', processedIds: ['1', '1', '2'], refresh: { nextRefreshAt: 12345 } }); assert.equal(snapshot.sessionId, 'session-test'); assert.deepEqual(Array.from(snapshot.processedIds), ['1', '2']); assert.equal(snapshot.refresh.nextRefreshAt, 12345); assert.equal(snapshot.status, 'scheduled-rest'); });
 test('会话删除上限支持不限', () => { const settings = context.InstagramCommentPaceConfig.validateSettings({ sessionLimit: 'unlimited' }); assert.equal(settings.sessionLimit, 'unlimited'); });
 test('自动加载配置固定开启且边界不接受用户覆盖', () => {
   const settings = context.InstagramCommentPaceConfig.normalizeSettings({ pagination: { enabled: false, maxBatches: 7, noGrowthAttempts: 2, stableWaitMs: 300, allowDeletion: false } });
@@ -171,7 +175,10 @@ test('多语言加载更多评论入口可被识别', () => {
 });
 test('运行时只使用 DOM，不安装接口响应观察器', () => {
   const manifest = JSON.parse(fs.readFileSync('manifest.json', 'utf8'));
+  assert.equal(manifest.permissions.includes('alarms'), true);
   const runtimeScripts = manifest.content_scripts.flatMap((item) => item.js || []);
+  assert.equal(runtimeScripts.includes('src/shared/task-session.js'), true);
+  assert.equal(runtimeScripts.includes('src/shared/scheduled-rest.js'), true);
   const source = fs.readFileSync('src/content/social-comment-cleaner.js', 'utf8');
   const loader = fs.readFileSync('src/content/comment-pagination-loader.js', 'utf8');
   assert.equal(runtimeScripts.some((file) => file.includes('response-observer')), false);

@@ -6,6 +6,7 @@
     operation: { distribution: 'log-normal', meanSeconds: 18, minSeconds: 12, maxSeconds: 30, variability: 'medium' },
     rest: { distribution: 'log-normal', meanSeconds: 60, minSeconds: 45, maxSeconds: 90, variability: 'medium' },
     deleteDialogDelay: { distribution: 'log-normal', meanSeconds: 20, minSeconds: 5, maxSeconds: 25, variability: 'medium' },
+    refreshRest: { distribution: 'log-normal', meanSeconds: 1800, minSeconds: 600, maxSeconds: 3600, variability: 'medium' },
     maxConsecutive: 20,
     rateLimit: { perMinute: 5, perHour: 60 },
     backoff: { baseSeconds: 30, maxSeconds: 900, jitterRatio: 0.25, maxFailures: 3 },
@@ -70,10 +71,12 @@
       },
       // 使用字符串保存“不限”，避免 Infinity 序列化到 chrome.storage 后变成 null。
       sessionLimit: sessionLimit(source.sessionLimit),
-      sessionMaxMinutes: positive(source.sessionMaxMinutes, 120),
+      // 0 表示持续运行；填写正数时仍可设置额外的会话最长时间安全上限。
+      sessionMaxMinutes: Number(source.sessionMaxMinutes) > 0 ? Number(source.sessionMaxMinutes) : 0,
       pace: {
         operation, rest,
         deleteDialogDelay: normalizeDistribution(pace.deleteDialogDelay, DEFAULTS.deleteDialogDelay),
+        refreshRest: global.SocialCommentScheduledRest?.normalize ? global.SocialCommentScheduledRest.normalize(pace.refreshRest) : normalizeDistribution(pace.refreshRest, DEFAULTS.refreshRest),
         maxConsecutive: positive(pace.maxConsecutive, positive(source.batchLimit, DEFAULTS.maxConsecutive)),
         rateLimit: {
           perMinute: positive(pace.rateLimit?.perMinute, DEFAULTS.rateLimit.perMinute),
@@ -99,6 +102,11 @@
     if (deleteDialogDelay.minSeconds > deleteDialogDelay.maxSeconds || deleteDialogDelay.meanSeconds < deleteDialogDelay.minSeconds || deleteDialogDelay.meanSeconds > deleteDialogDelay.maxSeconds) {
       throw new Error('点击删除前等待时间的最短值、平均值和最长值必须按从小到大填写。');
     }
+    const rawRefreshRest = raw?.pace?.refreshRest || {};
+    const rawRefreshValues = ['minSeconds', 'meanSeconds', 'maxSeconds'].map((key) => Number(rawRefreshRest[key])).filter(Number.isFinite);
+    if (rawRefreshValues.some((value) => value < 600 || value > 3600)) throw new Error('本轮完成后的刷新休息时间必须在 10～60 分钟内。');
+    const refreshRest = settings.pace.refreshRest;
+    if (refreshRest.minSeconds < 600 || refreshRest.maxSeconds > 3600 || refreshRest.minSeconds > refreshRest.maxSeconds || refreshRest.meanSeconds < refreshRest.minSeconds || refreshRest.meanSeconds > refreshRest.maxSeconds) throw new Error('本轮完成后的刷新休息时间必须在 10～60 分钟内，且最短、平均、最长值按从小到大填写。');
     if (settings.pagination.maxBatches < 1 || settings.pagination.noGrowthAttempts < 1 || settings.pagination.stableWaitMs < 1) {
       throw new Error('自动加载批次、无新增重试次数和稳定等待时间必须为正数。');
     }
