@@ -61,6 +61,38 @@ test('加载器以新增评论 ID 作为批次增长依据', async () => {
   assert.equal(result.newIds, 1);
   assert.equal(result.batchIndex, 1);
   assert.equal(result.totalSeen, 2);
+  assert.equal(loader.shouldSkipBatchRest(), true);
+});
+test('加载增长后的末尾探测不休息，探测到新数据后恢复批次休息', async () => {
+  const body = { isConnected: true, querySelectorAll: () => [] };
+  context.document = { body, documentElement: {}, querySelectorAll: () => [] };
+  let ids = ['parent-1'];
+  let scrollCount = 0;
+  const surface = {
+    isConnected: true, parentElement: body, style: { overflowY: 'auto' }, scrollTop: 0, scrollHeight: 200, clientHeight: 100,
+    getBoundingClientRect: () => ({ width: 100, height: 100 }), querySelectorAll: () => [],
+    scrollTo: () => {
+      scrollCount += 1;
+      surface.scrollTop = 100;
+      if (scrollCount <= 2) ids = ['parent-1', `parent-${scrollCount + 1}`];
+    },
+  };
+  const loader = context.InstagramCommentPaginationLoader.create({
+    settings: { enabled: true, maxBatches: 4, noGrowthAttempts: 2, stableWaitMs: 1, waitTimeoutMs: 1 }, getSurface: () => surface,
+    getCommentIds: () => ids, isActive: () => true, waiter: { untilStable: async () => true },
+  });
+  const first = await loader.nextBatch();
+  assert.equal(first.status, 'loaded');
+  assert.equal(loader.shouldSkipBatchRest(), true);
+  const probe = await loader.nextBatch();
+  assert.equal(probe.status, 'loaded');
+  assert.equal(loader.shouldSkipBatchRest(), false);
+  const noGrowth = await loader.nextBatch();
+  assert.equal(noGrowth.status, 'no-growth');
+  assert.equal(loader.shouldSkipBatchRest(), true);
+  const completed = await loader.nextBatch();
+  assert.equal(completed.status, 'completed');
+  assert.equal(loader.shouldSkipBatchRest(), false);
 });
 test('加载器在评论容器替换后重新解析滚动容器并返回只读快照', async () => {
   const roots = [

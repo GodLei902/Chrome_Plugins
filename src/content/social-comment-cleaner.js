@@ -582,6 +582,8 @@
   }
   async function acquire() { while (!run.stopped && !run.paused) { const result = await send({ type: 'ICC_RATE_ACQUIRE', limits: run.settings.pace.rateLimit }); if (result.ok) return true; if (!Number.isFinite(result.retryAfterMs)) throw new Error(result.reason || '无法申请操作额度。'); if (!(await wait(result.retryAfterMs, `全局操作上限已满，等待 ${Math.ceil(result.retryAfterMs / 1000)} 秒...`))) return false; } return false; }
   async function waitBetweenBatches(batchIndex) {
+    // 加载器刚完成一轮后需要立即探测是否到底；否则最后一批处理完会先休息再发现完成。
+    if (run.pagination?.shouldSkipBatchRest?.()) return true;
     // 批次间使用现有随机延迟算法，参数是内置策略，不由用户配置。
     // 初始 DOM 已视为第 0 轮，首次进入加载器前也要先完成这一轮与下一轮之间的休息。
     if (batchIndex < 0) return true;
@@ -599,8 +601,9 @@
       run.stats.newComments = batch.newIds || 0;
       if (run.paused || run.stopped) return;
       if (batch.status === 'paused' || batch.status === 'cancelled') return;
-      if (batch.status === 'completed') return stop('completed', `预览完成：${batch.terminalReason || '当前页面没有更多可加载评论。'}`);
+      if (batch.status === 'completed' && !batch.newIds) return stop('completed', `预览完成：${batch.terminalReason || '当前页面没有更多可加载评论。'}`);
       if (!(await scan())) return;
+      if (batch.status === 'completed') return stop('completed', `预览完成：${batch.terminalReason || '当前页面没有更多可加载评论。'}`);
     }
   }
   async function process() {
@@ -641,6 +644,11 @@
         if (!run.stopped && !run.paused && result.candidates.length) { emptyRescanAttempts = 0; continue; }
         continue;
       }
+      // 分页器已经确认到底且稳定空结果重扫已完成，此时不再进入批次休息，直接结束。
+      const paginationSnapshot = run.pagination?.getSnapshot?.();
+      if (paginationSnapshot?.phase === 'completed') {
+        return stop('completed', `已完成：${paginationSnapshot.terminalReason || '当前页面没有更多可加载评论。'}`);
+      }
       if (!run.pagination) return stop('completed', '已完成：当前稳定评论容器中没有待处理回复。');
       const currentBatch = run.pagination.getSnapshot().batchIndex;
       if (!(await waitBetweenBatches(currentBatch))) return;
@@ -649,9 +657,13 @@
       run.stats.batches = batch.batchIndex;
       run.stats.newComments = batch.newIds || 0;
       if (run.paused || run.stopped || batch.status === 'paused' || batch.status === 'cancelled') return;
-      if (batch.status === 'completed') return stop('completed', `已完成：${batch.terminalReason || '当前页面没有更多可加载评论。'}`);
+      if (batch.status === 'completed' && !batch.newIds) return stop('completed', `已完成：${batch.terminalReason || '当前页面没有更多可加载评论。'}`);
       emptyRescanAttempts = 0;
       await scan();
+      // 达到最大批次时本轮可能同时带回新增评论；扫描完成后回到循环排空候选，再停止。
+      if (batch.status === 'completed' && !run.candidates.length) {
+        return stop('completed', `已完成：${batch.terminalReason || '当前页面没有更多可加载评论。'}`);
+      }
     }
   }
   async function start(mode) {
