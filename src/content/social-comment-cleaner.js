@@ -72,7 +72,7 @@
     const paginationState = run.pagination?.getSnapshot?.() || run.pagination?.state;
     run.ui.querySelector('[data-pagination]').textContent = paginationState
       ? `加载轮次 ${paginationState.batchIndex} · 本轮新增 ${paginationState.newIds} · 无新增 ${paginationState.noGrowthAttempts}/${run.settings?.pagination?.noGrowthAttempts || 0}`
-      : '自动加载未启用';
+      : '连续加载已启用';
     run.ui.querySelector('[data-wait]').textContent = run.waiting;
     run.ui.querySelector('[data-error]').textContent = run.error || '';
     const active = !run.stopped && !run.paused; const busy = active || run.starting;
@@ -581,10 +581,18 @@
     await releaseLock(); draw();
   }
   async function acquire() { while (!run.stopped && !run.paused) { const result = await send({ type: 'ICC_RATE_ACQUIRE', limits: run.settings.pace.rateLimit }); if (result.ok) return true; if (!Number.isFinite(result.retryAfterMs)) throw new Error(result.reason || '无法申请操作额度。'); if (!(await wait(result.retryAfterMs, `全局操作上限已满，等待 ${Math.ceil(result.retryAfterMs / 1000)} 秒...`))) return false; } return false; }
+  async function waitBetweenBatches(batchIndex) {
+    // 批次间使用现有随机延迟算法，参数是内置策略，不由用户配置。
+    // 初始 DOM 已视为第 0 轮，首次进入加载器前也要先完成这一轮与下一轮之间的休息。
+    if (batchIndex < 0) return true;
+    const config = run.settings.pagination.batchRest;
+    return wait(InstagramCommentDelay.generateDelayMs(config), '批次之间随机休息中...');
+  }
   async function processPreview() {
     // 阶段一只允许扫描和统计；自动加载完成后再回到 scan()，绝不调用 remove()。
-    if (!run.settings?.pagination?.enabled) return stop('completed', '预览完成：自动加载未启用，未执行删除。');
     while (!run.stopped && !run.paused) {
+      const currentBatch = run.pagination?.getSnapshot?.().batchIndex || 0;
+      if (!(await waitBetweenBatches(currentBatch))) return;
       run.state = 'loading'; run.waiting = '正在准备加载下一批评论...'; draw();
       const batch = await run.pagination.nextBatch();
       run.stats.batches = batch.batchIndex;
@@ -626,14 +634,24 @@
         }
         continue;
       }
-      // 当前评论容器没有候选时只做有限次稳定重扫；一级评论分页/滚动加载由用户控制。
+      // 当前评论容器没有候选时先做有限次稳定重扫，再自动加载下一批评论。
       if (emptyRescanAttempts < stabilityDefaults.emptyRescanAttempts) {
         emptyRescanAttempts += 1;
         const result = await scan();
         if (!run.stopped && !run.paused && result.candidates.length) { emptyRescanAttempts = 0; continue; }
         continue;
       }
-      return stop('completed', '已完成：当前稳定评论容器中没有待处理回复。');
+      if (!run.pagination) return stop('completed', '已完成：当前稳定评论容器中没有待处理回复。');
+      const currentBatch = run.pagination.getSnapshot().batchIndex;
+      if (!(await waitBetweenBatches(currentBatch))) return;
+      run.state = 'loading'; run.waiting = '正在准备加载下一批评论...'; draw();
+      const batch = await run.pagination.nextBatch();
+      run.stats.batches = batch.batchIndex;
+      run.stats.newComments = batch.newIds || 0;
+      if (run.paused || run.stopped || batch.status === 'paused' || batch.status === 'cancelled') return;
+      if (batch.status === 'completed') return stop('completed', `已完成：${batch.terminalReason || '当前页面没有更多可加载评论。'}`);
+      emptyRescanAttempts = 0;
+      await scan();
     }
   }
   async function start(mode) {

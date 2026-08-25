@@ -12,15 +12,17 @@ test('旧设置迁移到节奏配置', () => { const settings = context.Instagra
 test('节奏默认值使用新的批次与休息边界', () => { const settings = context.InstagramCommentPaceConfig.normalizeSettings({}); assert.equal(settings.pace.maxConsecutive, 20); assert.equal(settings.pace.rest.meanSeconds, 60); assert.equal(settings.pace.rest.minSeconds, 45); assert.equal(settings.pace.rest.maxSeconds, 90); assert.equal(settings.sessionLimit, 100); });
 test('删除前等待默认值使用 5 至 25 秒范围', () => { const settings = context.InstagramCommentPaceConfig.normalizeSettings({}); assert.equal(settings.pace.deleteDialogDelay.meanSeconds, 20); assert.equal(settings.pace.deleteDialogDelay.minSeconds, 5); assert.equal(settings.pace.deleteDialogDelay.maxSeconds, 25); });
 test('会话删除上限支持不限', () => { const settings = context.InstagramCommentPaceConfig.validateSettings({ sessionLimit: 'unlimited' }); assert.equal(settings.sessionLimit, 'unlimited'); });
-test('自动加载配置默认开启且保持有界重试', () => {
-  const settings = context.InstagramCommentPaceConfig.normalizeSettings({ pagination: { enabled: true, maxBatches: 7, noGrowthAttempts: 2, stableWaitMs: 300 } });
+test('自动加载配置固定开启且边界不接受用户覆盖', () => {
+  const settings = context.InstagramCommentPaceConfig.normalizeSettings({ pagination: { enabled: false, maxBatches: 7, noGrowthAttempts: 2, stableWaitMs: 300, allowDeletion: false } });
   assert.equal(context.InstagramCommentPaceConfig.normalizeSettings({}).pagination.enabled, true);
   assert.equal(settings.pagination.enabled, true);
-  assert.equal(settings.pagination.maxBatches, 7);
-  assert.equal(settings.pagination.noGrowthAttempts, 2);
-  assert.equal(settings.pagination.stableWaitMs, 300);
-  assert.equal(settings.pagination.allowDeletion, false);
+  assert.equal(settings.pagination.maxBatches, 20);
+  assert.equal(settings.pagination.noGrowthAttempts, 3);
+  assert.equal(settings.pagination.stableWaitMs, 800);
+  assert.equal(settings.pagination.allowDeletion, true);
   assert.equal(settings.pagination.waitTimeoutMs, 8000);
+  assert.deepEqual(settings.pagination.batchRest, { distribution: 'log-normal', meanSeconds: 12, minSeconds: 6, maxSeconds: 20, variability: 'medium' });
+  assert.equal(context.InstagramCommentPaginationLoader.normalizeSettings({ enabled: false }).enabled, true);
 });
 test('加载控件适配器能定位可见的多语言入口', () => {
   const button = {

@@ -8,7 +8,7 @@
     noGrowthAttempts: 3,
     stableWaitMs: 800,
     waitTimeoutMs: 8000,
-    allowDeletion: false,
+    allowDeletion: true,
   };
 
   function positive(value, fallback) {
@@ -18,13 +18,14 @@
   function normalizeSettings(raw) {
     const source = raw || {};
     return {
-      enabled: source.enabled !== false,
+      // 该开关已从用户界面移除，旧存储值也不能关闭连续加载。
+      enabled: true,
       maxBatches: positive(source.maxBatches, DEFAULTS.maxBatches),
       noGrowthAttempts: positive(source.noGrowthAttempts, DEFAULTS.noGrowthAttempts),
       stableWaitMs: positive(source.stableWaitMs, DEFAULTS.stableWaitMs),
       waitTimeoutMs: positive(source.waitTimeoutMs, DEFAULTS.waitTimeoutMs),
-      // 正式删除仍由主流程的独立安全开关控制，加载器不执行删除动作。
-      allowDeletion: source.allowDeletion === true,
+      // 正式运行跟随加载固定开启；加载器只负责加载，不直接执行删除。
+      allowDeletion: true,
     };
   }
 
@@ -179,7 +180,7 @@
     async function nextBatch() {
       if (!config.enabled) {
         state.phase = 'completed';
-        state.terminalReason = '自动加载未启用，预览只处理当前已加载评论。';
+        state.terminalReason = '连续加载策略未就绪，预览只处理当前已加载评论。';
         notify();
         return result('completed');
       }

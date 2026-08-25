@@ -9,8 +9,16 @@
     maxConsecutive: 20,
     rateLimit: { perMinute: 5, perHour: 60 },
     backoff: { baseSeconds: 30, maxSeconds: 900, jitterRatio: 0.25, maxFailures: 3 },
-    // 自动加载配置集中在共享配置模块，加载器只消费规范化后的值。
-    pagination: { enabled: true, maxBatches: 20, noGrowthAttempts: 3, stableWaitMs: 800, waitTimeoutMs: 8000, allowDeletion: false },
+    // 连续加载和批次间休息是内置安全策略，不暴露给用户配置。
+    pagination: {
+      enabled: true,
+      maxBatches: 20,
+      noGrowthAttempts: 3,
+      stableWaitMs: 800,
+      waitTimeoutMs: 8000,
+      allowDeletion: true,
+      batchRest: { distribution: 'log-normal', meanSeconds: 12, minSeconds: 6, maxSeconds: 20, variability: 'medium' },
+    },
   };
 
   function positive(value, fallback) { return Number(value) > 0 ? Number(value) : fallback; }
@@ -50,14 +58,15 @@
       targetPostUrl: typeof source.targetPostUrl === 'string' ? source.targetPostUrl.trim() : '',
       whitelist: typeof source.whitelist === 'string' ? source.whitelist.trim() : '',
       deleteKeywords: typeof source.deleteKeywords === 'string' ? source.deleteKeywords.trim() : '',
-      // 自动加载默认开启；关闭后预览仍只处理当前 DOM，正式删除需另行打开独立安全开关。
+      // 自动加载和正式运行跟随加载固定开启；忽略旧版本保存的开关，避免旧设置改变安全边界。
       pagination: {
-        enabled: source.pagination ? source.pagination.enabled !== false : DEFAULTS.pagination.enabled,
-        maxBatches: positive(source.pagination?.maxBatches, DEFAULTS.pagination.maxBatches),
-        noGrowthAttempts: positive(source.pagination?.noGrowthAttempts, DEFAULTS.pagination.noGrowthAttempts),
-        stableWaitMs: positive(source.pagination?.stableWaitMs, DEFAULTS.pagination.stableWaitMs),
-        waitTimeoutMs: positive(source.pagination?.waitTimeoutMs, DEFAULTS.pagination.waitTimeoutMs),
-        allowDeletion: source.pagination?.allowDeletion === true,
+        enabled: DEFAULTS.pagination.enabled,
+        maxBatches: DEFAULTS.pagination.maxBatches,
+        noGrowthAttempts: DEFAULTS.pagination.noGrowthAttempts,
+        stableWaitMs: DEFAULTS.pagination.stableWaitMs,
+        waitTimeoutMs: DEFAULTS.pagination.waitTimeoutMs,
+        allowDeletion: DEFAULTS.pagination.allowDeletion,
+        batchRest: clone(DEFAULTS.pagination.batchRest),
       },
       // 使用字符串保存“不限”，避免 Infinity 序列化到 chrome.storage 后变成 null。
       sessionLimit: sessionLimit(source.sessionLimit),
