@@ -239,9 +239,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return sendResponse(result);
     }
     const sessionKey = snapshotKey(message.targetUrl);
-    if (message.type === 'ICC_SAVE_SESSION') await chrome.storage.local.set({ [sessionKey]: { ...message.snapshot, ownerTabId: sender.tab?.id || message.snapshot?.ownerTabId || null } });
+    // 会话操作完成后必须立即响应，避免继续落入未知消息类型分支。
+    if (message.type === 'ICC_SAVE_SESSION') {
+      await chrome.storage.local.set({ [sessionKey]: { ...message.snapshot, ownerTabId: sender.tab?.id || message.snapshot?.ownerTabId || null } });
+      return sendResponse({ ok: true });
+    }
     if (message.type === 'ICC_GET_SESSION') return sendResponse({ ok: true, snapshot: (await chrome.storage.local.get(sessionKey))[sessionKey] || null });
-    if (message.type === 'ICC_CLEAR_SESSION') { await chrome.storage.local.remove(sessionKey); await clearRefreshAlarm(message.targetUrl); }
+    if (message.type === 'ICC_CLEAR_SESSION') {
+      await chrome.storage.local.remove(sessionKey);
+      await clearRefreshAlarm(message.targetUrl);
+      return sendResponse({ ok: true });
+    }
     sendResponse({ ok: false, reason: `不支持的消息类型：${message.type}` });
   })().catch((error) => sendResponse({ ok: false, reason: error.message }));
   return true;
