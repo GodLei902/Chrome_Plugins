@@ -1,4 +1,4 @@
-importScripts('../shared/rate-limiter.js', '../shared/task-session.js');
+importScripts('../shared/rate-limiter.js', '../shared/task-session.js', '../platform/contract.js', '../platform/registry.js', '../platform/instagram/identity.js', '../platform/instagram/plugin.js');
 
 const SNAPSHOT_PREFIX = 'instagramCommentCleanerSession:';
 const LOCK_PREFIX = 'instagramCommentCleanerLock:';
@@ -8,14 +8,7 @@ const LEASE_MS = 90 * 1000;
 const DEBUGGER_VERSION = '1.3';
 
 function normalizeTargetUrl(value) {
-  try {
-    const url = new URL(value);
-    const match = url.pathname.match(/^\/(p|reel)\/([^/]+)\/?$/i);
-    if (!['instagram.com', 'www.instagram.com'].includes(url.hostname.toLowerCase()) || !match) return '';
-    return `https://www.instagram.com/${match[1].toLowerCase()}/${match[2]}/`;
-  } catch {
-    return '';
-  }
+  return globalThis.SocialCommentPlatformRegistry?.resolve(value)?.identity.normalizeTargetUrl(value) || '';
 }
 
 function refreshAlarmName(targetUrl) { return `${REFRESH_ALARM_PREFIX}${encodeURIComponent(targetUrl)}`; }
