@@ -236,6 +236,19 @@ test('评论菜单优先使用评论行内 SVG 结构并递归读取子级标签
   assert.deepEqual(api.findCommentMenuResult(row).status, 'ok');
 });
 
+test('真实页面的 div role=button 评论选项结构在中日文标签下均可定位', () => {
+  const { api } = load();
+  for (const label of ['评论选项', 'コメントのオプション']) {
+    const row = new FakeElement('div');
+    const svg = new FakeElement('svg', { role: 'img', viewBox: '0 0 24 24' })
+      .append(new FakeElement('title', {}, label), new FakeElement('circle'), new FakeElement('circle'), new FakeElement('circle'));
+    const menu = new FakeElement('div', { role: 'button', tabindex: '0' }).append(new FakeElement('div').append(svg));
+    row.append(new FakeElement('div', {}, '回复'), menu, new FakeElement('div', {}, '赞'));
+    assert.equal(api.findCommentMenu(row), menu, label);
+    assert.equal(api.findCommentMenuResult(row).status, 'ok', label);
+  }
+});
+
 test('评论行内没有唯一选项控件时返回歧义或未找到，不猜测其它按钮', () => {
   const { api } = load();
   const row = new FakeElement('article');

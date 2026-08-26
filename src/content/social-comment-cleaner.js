@@ -452,6 +452,34 @@
   function commentMenuFor(element) {
     return globalThis.InstagramControlLocator?.findCommentMenu?.(element) || [...element.querySelectorAll('button,[role="button"]')].filter(visible).find(isCommentMenu) || null;
   }
+  function revealCommentMenu(element) {
+    if (!element?.dispatchEvent) return;
+    // 评论选项按钮默认只在评论行悬停后挂载；按浏览器常见事件顺序尝试触发
+    // Instagram 的 React 悬停状态，同时不读取私有接口或扩大页面权限。
+    const view = element.ownerDocument?.defaultView || globalThis;
+    const rect = element.getBoundingClientRect?.();
+    const eventPoint = rect ? {
+      clientX: Math.round(rect.left + Math.max(1, rect.width / 2)),
+      clientY: Math.round(rect.top + Math.max(1, rect.height / 2)),
+    } : {};
+    const dispatch = (type, Constructor) => {
+      try {
+        const EventConstructor = view?.[Constructor] || globalThis?.[Constructor] || globalThis.Event;
+        if (typeof EventConstructor === 'function') element.dispatchEvent(new EventConstructor(type, {
+          bubbles: true,
+          cancelable: true,
+          view,
+          ...eventPoint,
+          ...(Constructor === 'PointerEvent' ? { pointerType: 'mouse' } : {}),
+        }));
+      } catch { /* 某些测试环境未提供 PointerEvent/MouseEvent，继续尝试其它事件 */ }
+    };
+    dispatch('pointerover', 'PointerEvent');
+    dispatch('pointerenter', 'PointerEvent');
+    dispatch('mouseover', 'MouseEvent');
+    dispatch('mouseenter', 'MouseEvent');
+    dispatch('mousemove', 'MouseEvent');
+  }
   function expansionRootsFor(scope = null) {
     if (!scope) {
       const values = [];
@@ -784,10 +812,19 @@
     if (!(await ensureReplyDom(candidate))) throw new Error('目标一级评论的子级内容尚未渲染，已暂停。');
     candidate.element = locateCommentElement(candidate);
     if (!candidate.element?.isConnected) throw new Error('目标回复尚未渲染到页面，正在重新扫描。');
+    candidate.element.scrollIntoView?.({ block: 'center', behavior: 'auto' });
+    revealCommentMenu(candidate.element);
     candidate.element.focus?.();
-    const menuResult = locator?.findCommentMenuResult?.(candidate.element) || { status: 'ok', action: commentMenuFor(candidate.element) };
-    const more = menuResult.action;
-    if (menuResult.status !== 'ok' || !more) throw new Error(menuResult.reason || '未找到可靠的评论菜单，已暂停。');
+    let menuResult = null;
+    const commentMenuReady = await waitForCondition(() => {
+      // 悬停状态可能触发评论行重绘；每次轮询都按评论 ID 重新取一次短期节点引用。
+      const refreshed = locateCommentElement(candidate);
+      if (refreshed?.isConnected && visible(refreshed)) candidate.element = refreshed;
+      menuResult = locator?.findCommentMenuResult?.(candidate.element) || { status: 'ok', action: commentMenuFor(candidate.element) };
+      return menuResult.status === 'ok' && Boolean(menuResult.action);
+    }, 1800, '正在显示评论菜单...');
+    const more = menuResult?.action;
+    if (!commentMenuReady || menuResult?.status !== 'ok' || !more) throw new Error(menuResult?.reason || '未找到可靠的评论菜单，已暂停。');
     const beforeSurface = locator?.captureActionSurfaceState?.(document) || null;
     const opened = await coordinateAction('open-comment-menu', async () => { more.focus?.(); more.click(); return true; });
     if (!opened.ok) throw new Error('评论菜单动作已取消。');
