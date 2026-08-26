@@ -103,11 +103,12 @@
     }
 
     function hasReachedEnd(root, scroller, controls, loading) {
-      if (state.batchIndex >= config.maxBatches) {
+      const pendingReplies = Boolean(options.hasPendingReplyExpansion?.(root));
+      if (state.batchIndex >= config.maxBatches && !pendingReplies) {
         state.terminalReason = `已达到自动加载批次上限（${config.maxBatches} 轮）。`;
         return true;
       }
-      if (resolvedSurface.isAtEnd(scroller) && state.noGrowthAttempts >= config.noGrowthAttempts && !controls.length && !loading) {
+      if (resolvedSurface.isAtEnd(scroller) && state.noGrowthAttempts >= config.noGrowthAttempts && !controls.length && !loading && !pendingReplies) {
         state.terminalReason = `连续 ${config.noGrowthAttempts} 次没有新增评论 ID，已到达当前页面末尾。`;
         return true;
       }
@@ -185,7 +186,9 @@
         return result('completed');
       }
       if (!isActive() || cancelled) return result(state.phase === 'paused' ? 'paused' : 'cancelled');
-      if (state.batchIndex >= config.maxBatches) {
+      const initialRoot = resolvedSurface.resolveRoot();
+      const pendingReplies = Boolean(options.hasPendingReplyExpansion?.(initialRoot));
+      if (state.batchIndex >= config.maxBatches && !pendingReplies) {
         state.phase = 'completed';
         state.terminalReason = `已达到自动加载批次上限（${config.maxBatches} 轮）。`;
         notify();

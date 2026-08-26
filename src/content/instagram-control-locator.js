@@ -46,7 +46,7 @@
   }
 
   function isReplyDisclosureControl(node, languageHints) {
-    return visible(node) && match('replyDisclosure', node, languageHints).matched;
+    return visible(node) && (isReplyDisclosureShape(node) || match('replyDisclosure', node, languageHints).matched);
   }
 
   function commentLinksIn(node) {
@@ -67,9 +67,9 @@
       const links = commentLinksIn(node);
       if (links.length !== 1) break;
       row = node;
-      // 继续越过普通“回复”按钮，直到找到正则明确匹配的展开入口。
-      const disclosure = controlsIn(node).filter((control) => isReplyDisclosureControl(control, languageHints));
-      if (disclosure.length === 1) return node;
+      // 评论数据行只负责读取作者和正文，不能为了找展开控件继续扩大到外层容器；
+      // 否则 Instagram 的 role=button 区块会把正文也当成控件文案过滤掉。
+      if (node !== link && controlsIn(node).length > 0) return node;
     }
     return row;
   }
@@ -84,60 +84,91 @@
     return 0;
   }
 
-  function elementLeft(entry) {
-    const rect = (entry?.anchor || entry?.element)?.getBoundingClientRect?.();
-    const left = Number(rect?.left);
-    return Number.isFinite(left) ? left : null;
-  }
-
   function isBefore(left, right) {
     return Boolean(left?.compareDocumentPosition?.(right) & 4);
   }
 
+  function orderedCommentLinks(root) {
+    return commentLinksIn(root).sort((left, right) => {
+      if (left === right) return 0;
+      if (isBefore(left, right)) return -1;
+      if (isBefore(right, left)) return 1;
+      return 0;
+    });
+  }
+
+  function commentRowId(commentRow) {
+    return commentIdFromUrl(commentLinksIn(commentRow)[0]?.getAttribute?.('href'));
+  }
+
+  function isControlForCommentRow(control, commentRow, root) {
+    if (!commentRow) return true;
+    if (commentRow.contains?.(control)) return true;
+    const id = commentRowId(commentRow);
+    if (!id) return false;
+    const previous = orderedCommentLinks(root || global.document)
+      .filter((link) => isBefore(link, control))
+      .pop();
+    const previousId = commentIdFromUrl(previous?.getAttribute?.('href'));
+    return previousId === id || listParentId({ id: previousId, anchor: previous }) === id;
+  }
+
   function disclosureParentId(entry) {
+    // 展开控件与后续评论可能处在同一个平级容器中；仅凭控件的先后顺序
+    // 无法证明后续评论是回复，必须等待 Instagram 提供明确的列表层级。
+    return listParentId(entry);
+  }
+
+  function listParentId(entry) {
     const anchor = entry?.anchor;
-    for (let depth = 0, node = entry?.element || anchor; node && depth < 20; depth += 1, node = node.parentElement) {
-      if (['BODY', 'HTML', 'MAIN'].includes(String(node.tagName || '').toUpperCase())) break;
-      const links = commentLinksIn(node);
-      const controls = controlsIn(node).filter((control) => isReplyDisclosureControl(control)
-        || control.getAttribute?.('aria-expanded') === 'true');
-      for (const control of controls) {
-        const owner = links.filter((link) => link !== anchor && isBefore(link, control)).pop();
+    let list = anchor?.closest?.('ul') || null;
+    for (let depth = 0; list && depth < 6; depth += 1, list = list.parentElement?.closest?.('ul') || null) {
+      for (let node = list.parentElement; node && node !== global.document?.body; node = node.parentElement) {
+        if (['BODY', 'HTML', 'MAIN'].includes(String(node.tagName || '').toUpperCase())) break;
+        const owner = commentLinksIn(node).filter((link) => !list.contains?.(link) && isBefore(link, list)).pop();
         const id = commentIdFromUrl(owner?.getAttribute?.('href'));
-        if (id) return id;
+        if (id && id !== String(entry?.id || '')) return id;
       }
     }
     return '';
   }
 
-  function deriveReplyParentIds(entries, tolerancePx = 8) {
+  function deriveReplyParentIds(entries) {
     const parentIds = new Map();
-    const stack = [];
-    const tolerance = Math.max(0, Number(tolerancePx) || 0);
     const ordered = [...(entries || [])].filter((entry) => entry?.id).sort(compareDomOrder);
     ordered.forEach((entry) => {
       const parentId = disclosureParentId(entry);
-      if (parentId && parentId !== String(entry.id)) parentIds.set(String(entry.id), parentId);
-    });
-    for (const entry of ordered) {
-      if (parentIds.has(String(entry.id))) continue;
-      const left = elementLeft(entry);
-      // 当前页面没有 ul 层级时，仅在几何缩进提供明确证据时建立父级；
-      // 缺少证据则保持一级评论，避免猜测后删除错误对象。
-      if (left == null) {
-        stack.length = 0;
-        continue;
+      if (parentId && parentId !== String(entry.id)) {
+        parentIds.set(String(entry.id), parentId);
       }
-      while (stack.length && left <= stack[stack.length - 1].left + tolerance) stack.pop();
-      const parent = stack[stack.length - 1];
-      if (parent && left > parent.left + tolerance) parentIds.set(String(entry.id), parent.id);
-      stack.push({ id: String(entry.id), left });
-    }
+    });
+    // 折叠状态下 Instagram 不提供可靠的层级结构，时间链接横坐标会随文本长度变化。
+    // 没有明确结构证据时保持一级评论，等待逐条展开后再根据真实回复列表建树。
     return parentIds;
   }
 
   function replyContainer(node) {
+    let current = node?.parentElement;
+    for (let depth = 0; current && depth < 4; depth += 1, current = current.parentElement) {
+      const children = [...(current.children || [])];
+      if (children.some((child) => child !== node && child.tagName === 'UL')) return current;
+    }
     return node?.parentElement || null;
+  }
+
+  function hasFollowingVisibleList(control, container) {
+    if (!container) return false;
+    const children = [...(container.children || [])];
+    const owner = children.find((child) => child === control || child.contains?.(control));
+    const start = owner ? children.indexOf(owner) + 1 : 0;
+    for (let index = start; index < children.length; index += 1) {
+      const child = children[index];
+      if (child.tagName === 'UL' && visible(child)) return true;
+      // 经过另一条评论或另一个展开入口后，后面的列表属于其它评论，
+      // 不能用来证明当前入口已经展开。
+      if (commentLinksIn(child).length || controlsIn(child).some((node) => isReplyDisclosureControl(node))) return false;
+    }
+    return false;
   }
 
   function isExpandedReplyDisclosure(node) {
@@ -148,7 +179,7 @@
     if (controls && global.document?.getElementById) {
       return controls.split(/\s+/).filter(Boolean).some((id) => visible(global.document.getElementById(id)));
     }
-    return false;
+    return hasFollowingVisibleList(node, replyContainer(node));
   }
 
   function match(type, node, languageHints) {
@@ -162,13 +193,16 @@
       if (ancestor.id === 'icc-host' || ['dialog', 'menu', 'listbox'].includes(ancestor.getAttribute?.('role'))) return false;
       ancestor = ancestor.parentElement;
     }
-    return match('replyDisclosure', node, languageHints).matched
+    return isReplyDisclosureShape(node) || match('replyDisclosure', node, languageHints).matched
       || match('hiddenComments', node, languageHints).matched || match('loadMore', node, languageHints).matched;
   }
 
   function findReplyDisclosureControls(root, commentRow, languageHints) {
-    const scope = commentRow || root;
-    return controlsIn(scope).filter((node) => isExpansionControl(node, languageHints) && !isExpandedReplyDisclosure(node));
+    const scope = root || commentRow;
+    const candidates = controlsIn(scope).filter((node) => isExpansionControl(node, languageHints)
+      && !isExpandedReplyDisclosure(node) && isControlForCommentRow(node, commentRow, scope));
+    const shaped = candidates.filter(isReplyDisclosureShape);
+    return shaped.length ? shaped : candidates;
   }
 
   function findLoadMoreControls(root, languageHints) {
@@ -285,6 +319,7 @@
       ariaExpanded: control?.getAttribute?.('aria-expanded') || '',
       container,
       containerSignature: elementSignature(container),
+      containerHasList: hasFollowingVisibleList(control, container),
       signature: elementSignature(control),
     };
   }
@@ -296,8 +331,9 @@
     const ariaChanged = before?.ariaExpanded === 'false' && control?.getAttribute?.('aria-expanded') === 'true';
     const changed = control && (!control.isConnected || !visible(control) || elementSignature(control) !== before?.signature);
     const containerChanged = before?.container && current.containerSignature && before.containerSignature !== current.containerSignature;
+    const listAppeared = Boolean(before?.container && hasFollowingVisibleList(control, before.container)) || Boolean(before?.containerHasList === false && current.containerHasList);
     const stableChange = current.stable === true || current.stableSnapshot;
-    return { ok: Boolean(newId || ariaChanged || (changed && stableChange) || (containerChanged && stableChange)), newId, containerChanged, ariaChanged, changed };
+    return { ok: Boolean(newId || ariaChanged || listAppeared || (changed && stableChange) || (containerChanged && stableChange)), newId, listAppeared, containerChanged, ariaChanged, changed };
   }
 
   function waitForDeleteResult(commentId, current = {}) {

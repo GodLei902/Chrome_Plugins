@@ -6,7 +6,7 @@
   const stabilityDefaults = globalThis.InstagramCommentSurfaceStability?.DEFAULTS || { mutationDebounceMs: 250, rafConfirmCount: 2, stablePasses: 2, initialReadyTimeoutMs: 15000, postDeleteSettleTimeoutMs: 10000, emptyRescanAttempts: 3 };
   const panelState = globalThis.SocialCommentFloatingPanel;
   const initialPanelState = panelState?.createState?.() || { uiMode: 'launcher', launcherPosition: { edge: 'right', offset: 64 }, drag: {} };
-  const run = { stopped: true, paused: false, starting: false, pauseFailure: false, mode: 'preview', state: 'idle', sessionId: '', startedAt: 0, stats: { scanned: 0, matched: 0, deleted: 0, skipped: 0, loaded: 0, discovered: 0, topLevel: 0, replies: 0, batches: 0, newComments: 0 }, candidates: [], previewCandidateMap: new Map(), parentUnits: new Map(), completedParentIds: new Set(), currentParentId: '', timer: null, restTimer: null, lockTimer: null, waiting: '', error: '', refresh: { count: 0, restStartedAt: 0, restDelayMs: 0, nextRefreshAt: 0, lastReason: '' }, seenIds: new Set(), seenCommentIds: new Set(), seenReplyIds: new Set(), matchedIds: new Set(), skippedIds: new Set(), processedIds: new Set(), lastScanIds: new Set(), scanInFlight: false, scanGeneration: 0, pagination: null, ui: null, host: null, uiMode: initialPanelState.uiMode, launcherPosition: { ...initialPanelState.launcherPosition }, drag: { ...initialPanelState.drag }, closeDialog: null, stability: { surface: null, surfaceGeneration: 0, mutationVersion: 0, lastMutationAt: 0, observer: null, discoveryObserver: null, pending: new Set(), discoveryCount: 0, stage: '', lastSnapshot: '' } };
+  const run = { stopped: true, paused: false, starting: false, pauseFailure: false, mode: 'preview', state: 'idle', sessionId: '', startedAt: 0, stats: { scanned: 0, matched: 0, deleted: 0, skipped: 0, loaded: 0, discovered: 0, topLevel: 0, replies: 0, batches: 0, newComments: 0 }, candidates: [], previewCandidateMap: new Map(), parentUnits: new Map(), completedParentIds: new Set(), currentParentId: '', timer: null, restTimer: null, lockTimer: null, waiting: '', error: '', refresh: { count: 0, restStartedAt: 0, restDelayMs: 0, nextRefreshAt: 0, lastReason: '' }, seenIds: new Set(), seenCommentIds: new Set(), seenReplyIds: new Set(), matchedIds: new Set(), skippedIds: new Set(), processedIds: new Set(), lastScanIds: new Set(), scanInFlight: false, scanGeneration: 0, pagination: null, replyExpansion: null, ui: null, host: null, uiMode: initialPanelState.uiMode, launcherPosition: { ...initialPanelState.launcherPosition }, drag: { ...initialPanelState.drag }, closeDialog: null, stability: { surface: null, surfaceGeneration: 0, mutationVersion: 0, lastMutationAt: 0, observer: null, discoveryObserver: null, pending: new Set(), discoveryCount: 0, stage: '', lastSnapshot: '' } };
   function uiClosedStorageKey() { return `${UI_CLOSED_KEY}:${location.origin}${location.pathname}`; }
   function isUiClosed() { try { return globalThis.sessionStorage?.getItem(uiClosedStorageKey()) === '1'; } catch { return false; } }
   function setUiClosed(closed) { try { if (closed) globalThis.sessionStorage?.setItem(uiClosedStorageKey(), '1'); else globalThis.sessionStorage?.removeItem(uiClosedStorageKey()); } catch { /* 隐私模式禁用 sessionStorage 时仍可正常运行 */ } }
@@ -452,41 +452,85 @@
   function commentMenuFor(element) {
     return globalThis.InstagramControlLocator?.findCommentMenu?.(element) || [...element.querySelectorAll('button,[role="button"]')].filter(visible).find(isCommentMenu) || null;
   }
-  async function revealCollapsedComments(scope = null) {
-    const clicked = new WeakSet();
-    const locator = globalThis.InstagramControlLocator;
-    let count = 0;
-    for (let pass = 0; pass < 40 && !run.stopped && !run.paused; pass += 1) {
-      const roots = scope ? [scope] : (() => {
-        const values = [];
-        for (let node = run.stability.surface; node && node !== document.body && values.length < 6; node = node.parentElement) values.push(node);
-        values.push(document);
-        return values;
-      })();
-      const controls = roots.flatMap((root) => locator?.findReplyDisclosureControls?.(root) || [...root.querySelectorAll('button,[role="button"]')].filter(isCommentExpansionControl));
-      const control = [...new Set(controls)].find((node) => !clicked.has(node) && visible(node) && !locator?.isExpandedReplyDisclosure?.(node));
-      if (!control) return;
-      const beforeIds = new Set(visibleCommentLinks().map((link) => commentIdFromUrl(link.getAttribute('href'))));
-      const beforeMutationVersion = run.stability.mutationVersion;
-      const beforeState = locator?.captureExpansionState?.(control, beforeIds) || { control, ids: beforeIds, signature: controlLabel(control), ariaExpanded: control.getAttribute('aria-expanded') || '' };
-      clicked.add(control);
-      const expansion = await coordinateAction('expand-replies', async () => { control.click(); return true; });
-      if (!expansion.ok) return count;
-      count += 1;
-      const expanded = await waitForCondition(() => {
-        const currentIds = new Set(visibleCommentLinks().map((link) => commentIdFromUrl(link.getAttribute('href'))));
-        const stable = run.stability.mutationVersion > beforeMutationVersion && !findLoadingIndicator(run.stability.surface || document);
-        const result = locator?.waitForExpansionResult?.(beforeState, { control, commentIds: currentIds, containerSignature: locator?.elementSignature?.(beforeState.container), stable })
-          || { ok: currentIds.size > beforeIds.size || (!control.isConnected && stable) };
-        return result.ok;
-      }, 8000, '正在展开回复并加载更多评论...');
-      if (!expanded && (run.stopped || run.paused)) return count;
-      if (scope) {
-        if (!expanded) throw new Error('当前一级评论的回复展开结果无法确认，已暂停。');
-        return count;
-      }
+  function expansionRootsFor(scope = null) {
+    if (!scope) {
+      const values = [];
+      for (let node = run.stability.surface; node && node !== document.body && values.length < 6; node = node.parentElement) values.push(node);
+      values.push(document);
+      return values;
     }
-    return count;
+    const values = [];
+    for (let node = scope; node && node !== document.body && values.length < 6; node = node.parentElement) values.push(node);
+    values.push(document);
+    return values;
+  }
+  function isReplyDisclosureLabel(node) {
+    return controlLabels(node).some((label) => replyExpander.test(label)
+      || globalThis.InstagramControlLabels?.matchControlLabel?.('replyDisclosure', [label])?.matched);
+  }
+  function isPendingReplyDisclosure(node) {
+    if (!node || !isReplyDisclosureLabel(node)) return false;
+    // Instagram 的折叠入口会保留“查看所有 N 条回复”文案，展开后才替换为
+    // “隐藏所有回复”或移除；没有 aria-expanded=true 时必须继续点击加载。
+    return node.getAttribute?.('aria-expanded') !== 'true';
+  }
+  function rawReplyDisclosureControls(root) {
+    if (!root) return [];
+    const nodes = [];
+    if (root.matches?.('button,[role="button"]')) nodes.push(root);
+    root.querySelectorAll?.('button,[role="button"]').forEach((node) => nodes.push(node));
+    return nodes;
+  }
+  function replyDisclosureControlsForRoots(roots, scope = null) {
+    const locator = globalThis.InstagramControlLocator;
+    const located = roots.flatMap((root) => locator?.findReplyDisclosureControls?.(root, scope) || []);
+    // 真实页面的回复入口是 div[role=button]；当页面层级重绘导致结构定位器
+    // 暂时返回空集时，仍以明确回复文案补回候选，但父级扫描继续使用结构归属。
+    const fallback = scope ? [] : roots.flatMap((root) => rawReplyDisclosureControls(root).filter(isReplyDisclosureLabel));
+    return [...new Set([...located, ...fallback])].filter(isPendingReplyDisclosure);
+  }
+  function pendingReplyExpansionControls(root = null) {
+    return replyDisclosureControlsForRoots(expansionRootsFor(root)).filter(visible);
+  }
+  function createReplyExpansionRunner() {
+    const factory = globalThis.InstagramCommentReplyExpansion;
+    const locator = globalThis.InstagramControlLocator;
+    if (!factory || !locator) return null;
+    return factory.create({
+      locator,
+      isActive: () => !run.stopped && !run.paused,
+      resolveScope: (scope, settings) => {
+        if (!settings?.parentId) return scope;
+        return locateCommentElement({ id: settings.parentId }) || (scope?.isConnected ? scope : null);
+      },
+      getRoots: (scope) => expansionRootsFor(scope),
+      getControls: (roots, currentScope) => replyDisclosureControlsForRoots(roots, currentScope),
+      isExpandedControl: (control) => !isPendingReplyDisclosure(control),
+      getCommentIds: () => new Set(visibleCommentLinks().map((link) => commentIdFromUrl(link.getAttribute('href')))),
+      captureState: (control, ids) => ({ ...locator.captureExpansionState(control, ids), mutationVersion: run.stability.mutationVersion }),
+      coordinateAction,
+      waitForExpansion: async ({ control, beforeIds, beforeState, count, timeoutMs }) => waitForCondition(() => {
+        const currentIds = new Set(visibleCommentLinks().map((link) => commentIdFromUrl(link.getAttribute('href'))));
+        // 只等待当前评论容器的加载状态；其它评论、视频或页面底部的 spinner
+        // 不应阻塞当前回复入口的确认。
+        const loadingRoot = beforeState.container || control?.parentElement || run.stability.surface || document;
+        const stable = run.stability.mutationVersion > (beforeState.mutationVersion || 0) && !findLoadingIndicator(loadingRoot);
+        const result = locator.waitForExpansionResult(beforeState, {
+          control,
+          commentIds: currentIds,
+          containerSignature: locator.elementSignature(beforeState.container),
+          stable,
+        });
+        return result.ok;
+      }, timeoutMs, `正在展开第 ${count} 个回复入口并等待页面稳定...`),
+    });
+  }
+  async function revealCollapsedComments(scope = null, settings = {}) {
+    if (!run.replyExpansion) run.replyExpansion = createReplyExpansionRunner();
+    if (!run.replyExpansion) throw new Error('回复展开模块未加载，已暂停。');
+    const result = await run.replyExpansion.expand(scope, settings);
+    if (!result.ok && !run.stopped && !run.paused && result.status !== 'cancelled') throw new Error(result.reason || '回复展开结果无法确认，已暂停。');
+    return result.count;
   }
   function postAuthorUsername(surface) {
     const firstComment = visibleCommentLinks(surface)[0];
@@ -547,6 +591,7 @@
       isActive: () => !run.stopped && !run.paused,
       coordinateAction,
       waiter: { untilStable: waitForStableSurface },
+      hasPendingReplyExpansion: () => pendingReplyExpansionControls().length > 0,
       onProgress: () => draw(),
     });
   }
@@ -662,7 +707,7 @@
         const parentElement = locateCommentElement(pending);
         if (!parentElement?.isConnected) throw new Error('当前一级评论无法重新定位，已暂停。');
         run.state = 'expanding'; draw();
-        const expanded = await revealCollapsedComments(parentElement);
+        const expanded = await revealCollapsedComments(parentElement, { parentId });
         const unit = run.parentUnits.get(parentId);
         if (unit) { unit.expanded = expanded > 0; unit.status = 'scanning'; }
         const scanned = await scanParent(parentId);
@@ -678,6 +723,9 @@
             const checkpointSaved = await saveSession('running');
             if (!checkpointSaved.ok) throw new Error(checkpointSaved.reason);
             const state = run.pace.success();
+            // 删除会触发评论区重绘，重绘后可能重新出现下一批回复入口；
+            // 继续使用父级 ID 串行展开，避免依赖旧 DOM 节点。
+            await revealCollapsedComments(null, { parentId });
             await scanParent(parentId);
             if (state === 'REST') { run.state = 'cooling-down'; draw(); if (!(await wait(InstagramCommentDelay.generateDelayMs(run.settings.pace.rest), '连续处理达到上限，正在休息...'))) return; run.pace.restComplete(); }
           } catch (error) {
@@ -725,22 +773,10 @@
     if (!parentId) return false;
     const existingReply = visibleCommentLinks().some((link) => commentIdFromUrl(link.getAttribute('href')) === String(candidate.id || ''));
     if (existingReply) return true;
-    const parentElement = locateCommentElement(candidate.parent || { id: parentId });
-    const locator = globalThis.InstagramControlLocator;
-    const controls = parentElement ? (locator?.findReplyDisclosureControls?.(parentElement, parentElement) || [...parentElement.querySelectorAll('button,[role="button"]')].filter(isCommentExpansionControl)) : [];
-    const control = controls.find((node) => !locator?.isExpandedReplyDisclosure?.(node));
-    if (!control) return false;
-    const beforeIds = new Set(visibleCommentLinks().map((link) => commentIdFromUrl(link.getAttribute('href'))));
-    const beforeMutationVersion = run.stability.mutationVersion;
-    const beforeState = locator?.captureExpansionState?.(control, beforeIds) || { control, ids: beforeIds, signature: controlLabel(control), ariaExpanded: control.getAttribute('aria-expanded') || '' };
-    const expansion = await coordinateAction('expand-replies', async () => { control.click(); return true; });
-    if (!expansion.ok) return false;
-    return await waitForCondition(() => {
-      const currentIds = new Set(visibleCommentLinks().map((link) => commentIdFromUrl(link.getAttribute('href'))));
-      if (currentIds.has(String(candidate.id || ''))) return true;
-      const stable = run.stability.mutationVersion > beforeMutationVersion && !findLoadingIndicator(run.stability.surface || document);
-      return Boolean(locator?.waitForExpansionResult?.(beforeState, { control, commentIds: currentIds, containerSignature: locator?.elementSignature?.(beforeState.container), stable })?.ok);
-    }, 8000, '正在展开目标一级评论的子级内容...');
+    // 执行删除前也走同一串行展开器，且每一轮按父级 ID 重新定位，
+    // 避免页面重绘后继续使用失效的评论行和展开控件。
+    const expanded = await revealCollapsedComments(null, { parentId });
+    return expanded > 0 && visibleCommentLinks().some((link) => commentIdFromUrl(link.getAttribute('href')) === String(candidate.id || ''));
   }
   async function remove(candidate) {
     const locator = globalThis.InstagramControlLocator;

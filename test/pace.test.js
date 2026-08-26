@@ -130,6 +130,35 @@ test('加载器在评论容器替换后重新解析滚动容器并返回只读�
   loader.state.batchIndex = 99;
   assert.equal(loader.getSnapshot().batchIndex, 1);
 });
+test('存在未展开回复入口时，达到加载批次上限也不能提前完成', async () => {
+  const body = { isConnected: true, querySelectorAll: () => [] };
+  context.document = { body, documentElement: {}, querySelectorAll: () => [] };
+  let ids = ['parent-1'];
+  let scrollCount = 0;
+  let pendingReplies = true;
+  const surface = {
+    isConnected: true, parentElement: body, style: { overflowY: 'auto' },
+    getBoundingClientRect: () => ({ width: 100, height: 100 }), querySelectorAll: () => [],
+    resolveRoot: () => surface,
+    getCommentIds: () => new Set(ids),
+    findScrollableElement: () => ({ scrollTop: 100, scrollHeight: 200, clientHeight: 100 }),
+    scrollToEnd: () => { scrollCount += 1; if (scrollCount === 1) ids = ['parent-1', 'parent-2']; return true; },
+    isAtEnd: () => true,
+  };
+  const loader = context.InstagramCommentPaginationLoader.create({
+    settings: { enabled: true, maxBatches: 1, noGrowthAttempts: 1, stableWaitMs: 1, waitTimeoutMs: 1 },
+    surface, controls: { findLoadMore: () => [], isLoading: () => false, getLabel: () => '', click: () => false },
+    hasPendingReplyExpansion: () => pendingReplies,
+    isActive: () => true, waiter: { untilStable: async () => true },
+  });
+  const loaded = await loader.nextBatch();
+  assert.equal(loaded.status, 'loaded');
+  const held = await loader.nextBatch();
+  assert.equal(held.status, 'no-growth');
+  pendingReplies = false;
+  const completed = await loader.nextBatch();
+  assert.equal(completed.status, 'completed');
+});
 test('加载器取消时不会等待完整超时', async () => {
   const surface = {
     resolveRoot: () => ({ isConnected: true }),
@@ -185,6 +214,11 @@ test('日文一级评论子级展开入口可被识别', () => {
   assert.equal(expander.test('返信をすべて見る'), true);
   assert.equal(expander.test('返信'), false);
 });
+test('回复展开确认只检查当前评论容器的加载状态', () => {
+  const source = fs.readFileSync('src/content/social-comment-cleaner.js', 'utf8');
+  assert.match(source, /const loadingRoot = beforeState\.container \|\| control\?\.parentElement \|\| run\.stability\.surface \|\| document/);
+  assert.match(source, /!findLoadingIndicator\(loadingRoot\)/);
+});
 test('多语言加载更多评论入口可被识别', () => {
   const source = fs.readFileSync('src/content/social-comment-cleaner.js', 'utf8');
   const literal = source.match(/const loadMoreExpander = (\/.*?\/i);/s)?.[1];
@@ -206,6 +240,7 @@ test('运行时只使用 DOM，不安装接口响应观察器', () => {
   assert.equal(runtimeScripts.includes('src/content/comment-pagination-surface.js'), true);
   assert.equal(runtimeScripts.includes('src/content/comment-pagination-controls.js'), true);
   assert.equal(runtimeScripts.includes('src/content/comment-pagination-loader.js'), true);
+  assert.equal(runtimeScripts.includes('src/content/comment-reply-expansion.js'), true);
   assert.equal(/\bfetch\b|XMLHttpRequest/.test(source), false);
   assert.equal(/\bfetch\b|XMLHttpRequest/.test(loader), false);
   assert.equal(/ICC_HOVER_COMMENT|chrome\.debugger|Input\.dispatchMouseEvent/.test(source + worker), false);
