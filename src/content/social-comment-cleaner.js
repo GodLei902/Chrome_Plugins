@@ -897,7 +897,9 @@
     const resuming = !restoring && !run.stopped && run.paused;
     run.starting = true; run.pauseFailure = false; draw();
     try {
-      run.settings = InstagramCommentPaceConfig.validateSettings((await chrome.storage.sync.get(KEY))[KEY] || {}); run.rules = InstagramCommentRules.prepareRules(run.settings);
+      const settingsResponse = await send({ type: 'ICC_GET_SETTINGS' });
+      if (!settingsResponse?.ok) throw new Error(settingsResponse?.reason || '无法读取扩展设置。');
+      run.settings = InstagramCommentPaceConfig.validateSettings(settingsResponse.settings || {}); run.rules = InstagramCommentRules.prepareRules(run.settings);
       // Instagram 完成导航后可能还会短暂替换地址（例如重定向或 SPA 路由更新）。
       // 启动消息只发送一次，因此在校验前等待目标 URL 稳定，避免用户再次点击页面内“开始”。
       for (let attempt = 0; attempt < 20 && InstagramCommentRules.normalizeTargetUrl(location.href) !== run.rules.targetUrl; attempt += 1) {

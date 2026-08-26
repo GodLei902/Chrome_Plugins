@@ -209,6 +209,8 @@ test('运行时只使用 DOM，不安装接口响应观察器', () => {
   assert.equal(/\bfetch\b|XMLHttpRequest/.test(source), false);
   assert.equal(/\bfetch\b|XMLHttpRequest/.test(loader), false);
   assert.equal(/ICC_HOVER_COMMENT|chrome\.debugger|Input\.dispatchMouseEvent/.test(source + worker), false);
+  assert.match(worker, /ICC_GET_SETTINGS/);
+  assert.equal(/chrome\.storage\.sync\.get/.test(source), false);
   assert.match(source, /function domComments\(/);
 });
 test('Preview 与正式模式共用一级评论串行编排，但 Preview 不进入删除分支', () => {

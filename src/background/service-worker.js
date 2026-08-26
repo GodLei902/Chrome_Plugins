@@ -143,6 +143,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   if (!message?.type?.startsWith('ICC_')) return false;
   (async () => {
+    if (message.type === 'ICC_GET_SETTINGS') {
+      const storageArea = chrome.storage?.sync || chrome.storage?.local;
+      if (!storageArea?.get) return sendResponse({ ok: false, reason: '扩展设置存储不可用。' });
+      const stored = await storageArea.get('socialCommentCleanerSettings');
+      return sendResponse({ ok: true, settings: stored?.socialCommentCleanerSettings || {} });
+    }
     const targetUrl = normalizeTargetUrl(message.targetUrl);
     if (!targetUrl) return sendResponse({ ok: false, reason: '目标 URL 无效。' });
     const key = `${LOCK_PREFIX}${targetUrl}`;
