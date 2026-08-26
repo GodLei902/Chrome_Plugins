@@ -211,3 +211,10 @@ test('运行时只使用 DOM，不安装接口响应观察器', () => {
   assert.equal(/ICC_HOVER_COMMENT|chrome\.debugger|Input\.dispatchMouseEvent/.test(source + worker), false);
   assert.match(source, /function domComments\(/);
 });
+test('Preview 与正式模式共用一级评论串行编排，但 Preview 不进入删除分支', () => {
+  const source = fs.readFileSync('src/content/social-comment-cleaner.js', 'utf8');
+  assert.equal(source.includes('processPreview'), false);
+  assert.match(source, /const preview = run\.mode === 'preview'/);
+  assert.match(source, /while \(!preview && run\.candidates\.length/);
+  assert.match(source, /return preview \? stop\('completed', `预览完成：/);
+});
