@@ -1,11 +1,10 @@
 importScripts('../shared/rate-limiter.js', '../shared/task-session.js', '../platform/contract.js', '../platform/registry.js', '../platform/instagram/identity.js', '../platform/instagram/plugin.js');
 
-const SNAPSHOT_PREFIX = 'instagramCommentCleanerSession:';
-const LOCK_PREFIX = 'instagramCommentCleanerLock:';
-const RATE_LIMIT_KEY = 'instagramCommentCleanerRateLimit';
+const SNAPSHOT_PREFIX = 'socialTaskSession:instagram:';
+const LOCK_PREFIX = 'socialTaskLock:instagram:';
+const RATE_LIMIT_PREFIX = 'socialTaskRateLimit:instagram:';
 const REFRESH_ALARM_PREFIX = 'socialTaskRefresh:instagram:';
 const LEASE_MS = 90 * 1000;
-const DEBUGGER_VERSION = '1.3';
 
 function normalizeTargetUrl(value) {
   return globalThis.SocialCommentPlatformRegistry?.resolve(value)?.identity.normalizeTargetUrl(value) || '';
@@ -13,6 +12,7 @@ function normalizeTargetUrl(value) {
 
 function refreshAlarmName(targetUrl) { return `${REFRESH_ALARM_PREFIX}${encodeURIComponent(targetUrl)}`; }
 function snapshotKey(targetUrl) { return `${SNAPSHOT_PREFIX}${targetUrl}`; }
+function rateLimitKey(targetUrl) { return `${RATE_LIMIT_PREFIX}${targetUrl}`; }
 function clearRefreshAlarm(targetUrl) { return chrome.alarms.clear(refreshAlarmName(targetUrl)); }
 function scheduleRefreshAlarm(targetUrl, when) {
   return chrome.alarms.create(refreshAlarmName(targetUrl), { when: Math.max(Date.now() + 1000, Number(when) || Date.now() + 1000) });
@@ -68,57 +68,6 @@ async function controlTargetTab(targetUrl, type) {
   if (!tab?.id) return { ok: false, reason: '尚未找到已打开的目标帖子，请先点击“开始”。' };
   const response = await chrome.tabs.sendMessage(tab.id, { type }).catch(() => null);
   return response?.ok ? response : { ok: false, reason: '目标页面尚未加载清理器，请等待页面完成加载后重试。' };
-}
-
-function debuggerAttach(target) {
-  return new Promise((resolve, reject) => {
-    chrome.debugger.attach(target, DEBUGGER_VERSION, () => {
-      const error = chrome.runtime.lastError;
-      if (error) reject(new Error(error.message));
-      else resolve();
-    });
-  });
-}
-
-function debuggerDetach(target) {
-  return new Promise((resolve) => {
-    chrome.debugger.detach(target, () => {
-      resolve();
-    });
-  });
-}
-
-function debuggerSendCommand(target, method, params) {
-  return new Promise((resolve, reject) => {
-    chrome.debugger.sendCommand(target, method, params, () => {
-      const error = chrome.runtime.lastError;
-      if (error) reject(new Error(error.message));
-      else resolve();
-    });
-  });
-}
-
-async function hoverCommentAtPoint(tabId, x, y) {
-  const target = { tabId };
-  let attached = false;
-  try {
-    await debuggerAttach(target);
-    attached = true;
-    // 真实鼠标移动才会触发 Instagram 的 hover 状态，合成 DOM 事件不够。
-    await debuggerSendCommand(target, 'Input.dispatchMouseEvent', {
-      type: 'mouseMoved',
-      x,
-      y,
-      button: 'none',
-      buttons: 0,
-      pointerType: 'mouse',
-    });
-    return { ok: true };
-  } catch (error) {
-    return { ok: false, reason: error.message || '无法悬停评论。' };
-  } finally {
-    if (attached) await debuggerDetach(target).catch(() => {});
-  }
 }
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -192,20 +141,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     })().catch((error) => sendResponse({ ok: false, reason: error.message }));
     return true;
   }
-  if (message?.type === 'ICC_HOVER_COMMENT') {
-    (async () => {
-      const tabId = sender.tab?.id;
-      const x = Number(message.x);
-      const y = Number(message.y);
-      if (!Number.isFinite(tabId) || !Number.isFinite(x) || !Number.isFinite(y)) return sendResponse({ ok: false, reason: '无法获取当前标签页或悬停坐标。' });
-      if (typeof chrome.debugger === 'undefined') return sendResponse({ ok: false, reason: '当前浏览器不支持调试悬停能力，请升级 Chrome。' });
-      return sendResponse(await hoverCommentAtPoint(tabId, x, y));
-    })().catch((error) => sendResponse({ ok: false, reason: error.message }));
-    return true;
-  }
   if (!message?.type?.startsWith('ICC_')) return false;
   (async () => {
-    const key = `${LOCK_PREFIX}${message.targetUrl}`;
+    const targetUrl = normalizeTargetUrl(message.targetUrl);
+    if (!targetUrl) return sendResponse({ ok: false, reason: '目标 URL 无效。' });
+    const key = `${LOCK_PREFIX}${targetUrl}`;
     if (message.type === 'ICC_ACQUIRE_LOCK') {
       const current = (await chrome.storage.local.get(key))[key];
       const now = Date.now();
@@ -225,13 +165,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return sendResponse({ ok: true });
     }
     if (message.type === 'ICC_RATE_ACQUIRE') {
-      const stored = (await chrome.storage.local.get(RATE_LIMIT_KEY))[RATE_LIMIT_KEY];
+      const limitKey = rateLimitKey(targetUrl);
+      const stored = (await chrome.storage.local.get(limitKey))[limitKey];
       const limiter = new InstagramCommentRateLimiter(stored);
       const result = limiter.acquire(message.limits || { perMinute: 5, perHour: 60 });
-      await chrome.storage.local.set({ [RATE_LIMIT_KEY]: limiter.snapshot() });
+      await chrome.storage.local.set({ [limitKey]: limiter.snapshot() });
       return sendResponse(result);
     }
-    const sessionKey = snapshotKey(message.targetUrl);
+    const sessionKey = snapshotKey(targetUrl);
     // 会话操作完成后必须立即响应，避免继续落入未知消息类型分支。
     if (message.type === 'ICC_SAVE_SESSION') {
       await chrome.storage.local.set({ [sessionKey]: { ...message.snapshot, ownerTabId: sender.tab?.id || message.snapshot?.ownerTabId || null } });
@@ -240,7 +181,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === 'ICC_GET_SESSION') return sendResponse({ ok: true, snapshot: (await chrome.storage.local.get(sessionKey))[sessionKey] || null });
     if (message.type === 'ICC_CLEAR_SESSION') {
       await chrome.storage.local.remove(sessionKey);
-      await clearRefreshAlarm(message.targetUrl);
+      await clearRefreshAlarm(targetUrl);
       return sendResponse({ ok: true });
     }
     sendResponse({ ok: false, reason: `不支持的消息类型：${message.type}` });

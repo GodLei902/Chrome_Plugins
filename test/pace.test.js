@@ -7,6 +7,16 @@ context.globalThis = context;
 for (const file of ['src/shared/delay-generator.js', 'src/shared/scheduled-rest.js', 'src/shared/task-session.js', 'src/shared/action-pace-config.js', 'src/shared/backoff.js', 'src/shared/action-pace-controller.js', 'src/shared/rate-limiter.js', 'src/content/comment-surface-stability.js', 'src/content/comment-pagination-surface.js', 'src/content/comment-pagination-controls.js', 'src/content/comment-pagination-loader.js']) vm.runInNewContext(fs.readFileSync(file, 'utf8'), context);
 test('延迟始终在配置范围内', () => { const config = { distribution: 'log-normal', meanSeconds: 18, minSeconds: 12, maxSeconds: 30, variability: 'high' }; for (let i = 0; i < 100; i += 1) { const value = context.InstagramCommentDelay.generateDelayMs(config); assert.ok(value >= 12000 && value <= 30000); } });
 test('状态机在连续上限后休息并重置', () => { const pace = new context.InstagramCommentPaceController({ maxConsecutive: 2, backoff: { maxFailures: 3 } }); pace.begin(); assert.equal(pace.success(), 'NORMAL'); pace.begin(); assert.equal(pace.success(), 'REST'); pace.restComplete(); assert.equal(pace.consecutive, 0); assert.equal(pace.state, 'NORMAL'); });
+test('统一动作协调器依次申请额度、等待并执行，取消后不点击', async () => {
+  const pace = new context.InstagramCommentPaceController({ maxConsecutive: 2, backoff: { maxFailures: 3 } });
+  const calls = [];
+  const completed = await pace.coordinate('expand-replies', async () => { calls.push('action'); return 'done'; }, { acquire: async (type) => { calls.push(`acquire:${type}`); return true; }, wait: async (ms, type) => { calls.push(`wait:${type}:${ms}`); return true; }, delayMs: 12 });
+  assert.deepEqual(calls, ['acquire:expand-replies', 'wait:expand-replies:12', 'action']);
+  assert.equal(completed.value, 'done');
+  const cancelled = await pace.coordinate('load-more', async () => { calls.push('should-not-run'); }, { isActive: () => false });
+  assert.equal(cancelled.status, 'cancelled');
+  assert.equal(calls.includes('should-not-run'), false);
+});
 test('限频窗口不超额且返回等待时间', () => { const limiter = new context.InstagramCommentRateLimiter(); assert.equal(limiter.acquire({ perMinute: 2, perHour: 3 }, 1000).ok, true); assert.equal(limiter.acquire({ perMinute: 2, perHour: 3 }, 1001).ok, true); const blocked = limiter.acquire({ perMinute: 2, perHour: 3 }, 1002); assert.equal(blocked.ok, false); assert.ok(blocked.retryAfterMs > 0); });
 test('旧设置迁移到节奏配置', () => { const settings = context.InstagramCommentPaceConfig.normalizeSettings({ deleteDelayMin: 10, deleteDelayMax: 20, cooldownMin: 40, cooldownMax: 80, batchLimit: 4 }); assert.equal(settings.pace.operation.meanSeconds, 15); assert.equal(settings.pace.rest.meanSeconds, 60); assert.equal(settings.pace.maxConsecutive, 4); });
 test('节奏默认值使用新的批次与休息边界', () => { const settings = context.InstagramCommentPaceConfig.normalizeSettings({}); assert.equal(settings.pace.maxConsecutive, 20); assert.equal(settings.pace.rest.meanSeconds, 60); assert.equal(settings.pace.rest.minSeconds, 45); assert.equal(settings.pace.rest.maxSeconds, 90); assert.equal(settings.sessionLimit, 100); });
@@ -51,10 +61,11 @@ test('加载器以新增评论 ID 作为批次增长依据', async () => {
   const body = { isConnected: true, querySelectorAll: () => [] };
   context.document = { body, documentElement: {}, querySelectorAll: () => [] };
   let ids = ['parent-1'];
+  let top = 0;
   const surface = {
-    isConnected: true, parentElement: body, style: { overflowY: 'auto' }, scrollTop: 0, scrollHeight: 200, clientHeight: 100,
+    isConnected: true, parentElement: body, style: { overflowY: 'auto' }, scrollHeight: 200, clientHeight: 100,
+    get scrollTop() { return top; }, set scrollTop(value) { top = value; if (value >= 99) ids = ['parent-1', 'parent-2']; },
     getBoundingClientRect: () => ({ width: 100, height: 100 }), querySelectorAll: () => [],
-    scrollTo: () => { surface.scrollTop = 100; ids = ['parent-1', 'parent-2']; },
   };
   const loader = context.InstagramCommentPaginationLoader.create({
     settings: { enabled: true, maxBatches: 3, noGrowthAttempts: 2, stableWaitMs: 1 }, getSurface: () => surface,
@@ -65,21 +76,18 @@ test('加载器以新增评论 ID 作为批次增长依据', async () => {
   assert.equal(result.newIds, 1);
   assert.equal(result.batchIndex, 1);
   assert.equal(result.totalSeen, 2);
-  assert.equal(loader.shouldSkipBatchRest(), true);
+  assert.equal(typeof loader.shouldSkipBatchRest, 'undefined');
 });
-test('加载增长后的末尾探测不休息，探测到新数据后恢复批次休息', async () => {
+test('加载增长后的每一批都保持统一节奏，不使用末尾探测特殊路径', async () => {
   const body = { isConnected: true, querySelectorAll: () => [] };
   context.document = { body, documentElement: {}, querySelectorAll: () => [] };
   let ids = ['parent-1'];
   let scrollCount = 0;
+  let top = 0;
   const surface = {
-    isConnected: true, parentElement: body, style: { overflowY: 'auto' }, scrollTop: 0, scrollHeight: 200, clientHeight: 100,
+    isConnected: true, parentElement: body, style: { overflowY: 'auto' }, scrollHeight: 200, clientHeight: 100,
+    get scrollTop() { return top; }, set scrollTop(value) { const crossed = value >= this.scrollHeight - this.clientHeight - 1 && top < value; top = value; if (crossed) { scrollCount += 1; if (scrollCount <= 2) { ids = ['parent-1', `parent-${scrollCount + 1}`]; this.scrollHeight += 100; } } },
     getBoundingClientRect: () => ({ width: 100, height: 100 }), querySelectorAll: () => [],
-    scrollTo: () => {
-      scrollCount += 1;
-      surface.scrollTop = 100;
-      if (scrollCount <= 2) ids = ['parent-1', `parent-${scrollCount + 1}`];
-    },
   };
   const loader = context.InstagramCommentPaginationLoader.create({
     settings: { enabled: true, maxBatches: 4, noGrowthAttempts: 2, stableWaitMs: 1, waitTimeoutMs: 1 }, getSurface: () => surface,
@@ -87,16 +95,12 @@ test('加载增长后的末尾探测不休息，探测到新数据后恢复批�
   });
   const first = await loader.nextBatch();
   assert.equal(first.status, 'loaded');
-  assert.equal(loader.shouldSkipBatchRest(), true);
   const probe = await loader.nextBatch();
   assert.equal(probe.status, 'loaded');
-  assert.equal(loader.shouldSkipBatchRest(), false);
   const noGrowth = await loader.nextBatch();
   assert.equal(noGrowth.status, 'no-growth');
-  assert.equal(loader.shouldSkipBatchRest(), true);
   const completed = await loader.nextBatch();
   assert.equal(completed.status, 'completed');
-  assert.equal(loader.shouldSkipBatchRest(), false);
 });
 test('加载器在评论容器替换后重新解析滚动容器并返回只读快照', async () => {
   const roots = [
@@ -145,6 +149,21 @@ test('加载器取消时不会等待完整超时', async () => {
   assert.equal(result.status, 'paused');
   assert.equal(result.terminalReason, '测试暂停。');
 });
+test('评论容器分帧滚动使用固定初始目标和可预测梯形曲线', async () => {
+  const surface = context.InstagramCommentPaginationSurface.create({ getRoot: () => context.document, getCommentIds: () => [] });
+  const values = [];
+  let top = 0;
+  const scroller = { isConnected: true, style: { overflowY: 'auto' }, scrollHeight: 1000, clientHeight: 200, get scrollTop() { return top; }, set scrollTop(value) { top = value; values.push(value); }, getBoundingClientRect: () => ({ width: 100, height: 200 }), querySelectorAll: () => [] };
+  const result = await surface.scrollToLoadPosition(scroller, { isActive: () => true, isCurrent: () => true });
+  assert.equal(result.ok, true);
+  assert.ok(values.length >= 3);
+  assert.equal(values.every((value, index) => index === 0 || value >= values[index - 1]), true);
+  assert.ok(values.at(-1) >= 799);
+  assert.ok(result.durationMs >= 360 && result.durationMs <= 1400);
+  assert.equal(surface.progressAt(0), 0);
+  assert.equal(surface.progressAt(1), 1);
+  assert.ok(surface.progressAt(0.5) > surface.progressAt(0.2));
+});
 test('评论快照签名与对象遍历顺序无关', () => {
   const stability = context.InstagramCommentSurfaceStability;
   const first = stability.snapshotSignature({ surfaceGeneration: 1, connected: true, commentIds: ['2', '1'], mappedReplies: [{ id: '2', text: 'b', username: 'u' }], data: [{ id: '1', parentId: '', childCount: 0 }] });
@@ -176,16 +195,19 @@ test('多语言加载更多评论入口可被识别', () => {
 test('运行时只使用 DOM，不安装接口响应观察器', () => {
   const manifest = JSON.parse(fs.readFileSync('manifest.json', 'utf8'));
   assert.equal(manifest.permissions.includes('alarms'), true);
+  assert.equal(manifest.permissions.includes('debugger'), false);
   const runtimeScripts = manifest.content_scripts.flatMap((item) => item.js || []);
   assert.equal(runtimeScripts.includes('src/shared/task-session.js'), true);
   assert.equal(runtimeScripts.includes('src/shared/scheduled-rest.js'), true);
   const source = fs.readFileSync('src/content/social-comment-cleaner.js', 'utf8');
   const loader = fs.readFileSync('src/content/comment-pagination-loader.js', 'utf8');
+  const worker = fs.readFileSync('src/background/service-worker.js', 'utf8');
   assert.equal(runtimeScripts.some((file) => file.includes('response-observer')), false);
   assert.equal(runtimeScripts.includes('src/content/comment-pagination-surface.js'), true);
   assert.equal(runtimeScripts.includes('src/content/comment-pagination-controls.js'), true);
   assert.equal(runtimeScripts.includes('src/content/comment-pagination-loader.js'), true);
   assert.equal(/\bfetch\b|XMLHttpRequest/.test(source), false);
   assert.equal(/\bfetch\b|XMLHttpRequest/.test(loader), false);
+  assert.equal(/ICC_HOVER_COMMENT|chrome\.debugger|Input\.dispatchMouseEvent/.test(source + worker), false);
   assert.match(source, /function domComments\(/);
 });

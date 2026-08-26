@@ -80,8 +80,6 @@
       lastScrollTop: 0,
       lastScrollHeight: 0,
       terminalReason: '',
-      // 每次成功加载后先做一次“是否到底”的即时探测；只有探测到仍有增长，下一轮才恢复批次休息。
-      endProbePending: false,
     };
 
     const isActive = options.isActive || (() => !cancelled);
@@ -194,10 +192,6 @@
         return result('completed');
       }
 
-      // 该调用如果来自上一轮的末尾探测，则不能再次插入批次休息；
-      // 探测成功发现新数据后，下一次真正加载才恢复正常休息。
-      const probingEnd = state.endProbePending;
-      state.endProbePending = false;
       const root = resolvedSurface.resolveRoot();
       const scroller = resolvedSurface.findScrollableElement(root);
       const beforeIds = resolvedSurface.getCommentIds(root);
@@ -210,7 +204,22 @@
       state.lastScrollHeight = Number(scroller?.scrollHeight || 0);
       notify();
 
-      const actionTaken = control ? resolvedControls.click(control) : resolvedSurface.scrollToEnd(scroller);
+      const actionType = control ? 'load-more' : 'scroll-comment-surface';
+      const action = () => control
+        ? resolvedControls.click(control)
+        : (resolvedSurface.scrollToLoadPosition
+          ? resolvedSurface.scrollToLoadPosition(scroller, { isActive, isCurrent: (node) => { const current = resolvedSurface.findScrollableElement(resolvedSurface.resolveRoot()); return !current || current === node; } }).then((result) => result?.ok !== false)
+          : resolvedSurface.scrollToEnd(scroller));
+      const coordinated = options.coordinateAction
+        ? await options.coordinateAction(actionType, action)
+        : { ok: true, value: await action() };
+      if (coordinated?.ok === false) {
+        state.phase = coordinated.status === 'cancelled' ? 'cancelled' : 'paused';
+        state.terminalReason = coordinated.reason || '分页动作已取消。';
+        notify();
+        return result(state.phase);
+      }
+      const actionTaken = coordinated?.ok !== false && (coordinated?.value === undefined ? true : coordinated.value);
       if (actionTaken) await waitForGrowth(beforeIds, control, beforeLabel);
       if (!isActive() || cancelled) return result(state.phase === 'paused' ? 'paused' : 'cancelled');
 
@@ -240,9 +249,6 @@
       const loading = resolvedControls.isLoading(currentRoot);
       const done = hasReachedEnd(currentRoot, currentScroller, nextControls, loading);
       if (done) state.phase = 'completed';
-      // 普通加载完成后安排一次无休息的末尾探测；探测仍有增长时清除标记，
-      // 避免连续增长的批次全部绕过节奏控制。没有增长则继续即时确认直到完成。
-      state.endProbePending = !done && (!probingEnd || newIds.length === 0);
       notify();
       return result(done ? 'completed' : (newIds.length ? 'loaded' : 'no-growth'), { ids: new Set(afterIds) });
     }
@@ -261,8 +267,6 @@
       getSnapshot: snapshot,
       nextBatch,
       cancel,
-      // 业务循环在调用 nextBatch 前读取该标记，避免已接近末尾时无意义地等待批次休息。
-      shouldSkipBatchRest: () => Boolean(state.endProbePending && state.phase !== 'completed'),
       findScrollableSurface: (root) => resolvedSurface.findScrollableElement(root),
       findLoadMoreControls: (root) => resolvedControls.findLoadMore(root),
       hasReachedEnd,

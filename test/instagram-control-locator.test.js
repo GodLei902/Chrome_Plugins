@@ -88,6 +88,18 @@ test('评论菜单优先使用评论行内 SVG 结构并递归读取子级标签
   menu.firstElementChild.firstElementChild.setAttribute('aria-label', '评论选项');
   assert.ok(api.getAccessibleLabels(menu).includes('评论选项'));
   assert.equal(api.findCommentMenu(row), menu);
+  assert.deepEqual(api.findCommentMenuResult(row).status, 'ok');
+});
+
+test('评论行内没有唯一选项控件时返回歧义或未找到，不猜测其它按钮', () => {
+  const { api } = load();
+  const row = new FakeElement('article');
+  const first = new FakeElement('button').append(new FakeElement('svg', { role: 'img' }).append(new FakeElement('circle'), new FakeElement('circle'), new FakeElement('circle')));
+  const second = new FakeElement('button').append(new FakeElement('svg', { role: 'img' }).append(new FakeElement('circle'), new FakeElement('circle'), new FakeElement('circle')));
+  row.append(first, second);
+  assert.equal(api.findCommentMenuResult(row).status, 'ambiguous');
+  const empty = new FakeElement('article').append(new FakeElement('button', {}, '回复'));
+  assert.equal(api.findCommentMenuResult(empty).status, 'not-found');
 });
 
 test('删除动作只在新弹层内匹配，并区分无权限的举报菜单', () => {

@@ -66,11 +66,50 @@
     }
 
     function scrollToEnd(scroller) {
-      if (!scroller) return false;
-      const targetTop = Math.max(0, Number(scroller.scrollHeight) - Number(scroller.clientHeight));
-      if (typeof scroller.scrollTo === 'function') scroller.scrollTo({ top: targetTop, behavior: 'auto' });
-      else scroller.scrollTop = targetTop;
-      return true;
+      return scrollToLoadPosition(scroller);
+    }
+
+    function progressAt(t, ramp = 0.18) {
+      const normalized = Math.max(0, Math.min(1, Number(t) || 0));
+      if (normalized <= ramp) return normalized * normalized / (2 * ramp * (1 - ramp));
+      if (normalized >= 1 - ramp) {
+        const remaining = 1 - normalized;
+        return 1 - remaining * remaining / (2 * ramp * (1 - ramp));
+      }
+      return (normalized - ramp / 2) / (1 - ramp);
+    }
+
+    // 只对确认过的评论滚动容器分帧写入 scrollTop；目标在动作开始时固定，
+    // 页面追加内容不会让本次动画追逐新的底部。
+    function scrollToLoadPosition(scroller, options = {}) {
+      if (!scroller || (!isScrollable(scroller) && Number(scroller.scrollHeight) <= Number(scroller.clientHeight))) return Promise.resolve({ ok: false, reason: '评论滚动容器不可用。' });
+      const isActive = options.isActive || (() => true);
+      const isCurrent = options.isCurrent || (() => true);
+      const startTop = Number(scroller.scrollTop) || 0;
+      const initialMaxTop = Math.max(0, Number(scroller.scrollHeight) - Number(scroller.clientHeight));
+      const targetTop = Math.max(startTop, initialMaxTop);
+      if (targetTop <= startTop + 1) return Promise.resolve({ ok: true, cancelled: false, startTop, targetTop, initialMaxTop, frames: 0 });
+      const distance = targetTop - startTop;
+      const speedPxPerSecond = Math.max(420, Math.min(720, Number(scroller.clientHeight) * 1.6));
+      const durationMs = Math.max(360, Math.min(1400, distance / speedPxPerSecond * 1000));
+      const frame = global.requestAnimationFrame || ((callback) => global.setTimeout(() => callback(Date.now()), 16));
+      const cancelFrame = global.cancelAnimationFrame || global.clearTimeout;
+      const startedAt = Date.now();
+      let frameId = null;
+      let frames = 0;
+      return new Promise((resolve) => {
+        const finish = (ok, cancelled = false) => { if (frameId !== null) cancelFrame(frameId); resolve({ ok, cancelled, startTop, targetTop, initialMaxTop, durationMs, frames, actualTop: Number(scroller.scrollTop) || 0 }); };
+        const tick = (timestamp) => {
+          if (!isActive() || !scroller.isConnected || !isCurrent(scroller)) return finish(false, true);
+          const elapsed = Math.max(0, Number(timestamp) - startedAt);
+          const progress = Math.min(1, elapsed / durationMs);
+          scroller.scrollTop = startTop + distance * progressAt(progress);
+          frames += 1;
+          if (progress >= 1) return finish(true);
+          frameId = frame(tick);
+        };
+        frameId = frame(tick);
+      });
     }
 
     function isAtEnd(scroller) {
@@ -78,7 +117,7 @@
       return Number(scroller.scrollTop) >= Math.max(0, Number(scroller.scrollHeight) - Number(scroller.clientHeight) - 2);
     }
 
-    return { resolveRoot, getCommentIds, rootsFor, findScrollableElement, scrollToEnd, isAtEnd };
+    return { resolveRoot, getCommentIds, rootsFor, findScrollableElement, scrollToEnd, scrollToLoadPosition, progressAt, isAtEnd };
   }
 
   global.InstagramCommentPaginationSurface = { create, isVisible, isScrollable };

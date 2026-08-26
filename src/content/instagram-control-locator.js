@@ -130,6 +130,17 @@
     return labelled.length === 1 ? labelled[0] : null;
   }
 
+  function findCommentMenuResult(commentRow, languageHints) {
+    if (!commentRow) return { status: 'not-found', action: null, reason: '目标回复行不存在。' };
+    const controls = controlsIn(commentRow).filter((node) => node !== commentRow);
+    const action = findCommentMenu(commentRow, languageHints);
+    if (action) return { status: 'ok', action, reason: '' };
+    const candidates = controls.filter((node) => scoreCommentMenu(node, commentRow) >= 0
+      || ((node.tagName === 'BUTTON' || node.getAttribute?.('tabindex') === '0')
+        && match('commentOptions', node, languageHints).matched));
+    return { status: candidates.length > 1 ? 'ambiguous' : 'not-found', action: null, reason: candidates.length > 1 ? '目标回复行存在多个评论选项控件。' : '目标回复行没有可确认的评论选项控件。' };
+  }
+
   function elementSignature(node) {
     if (!node) return '';
     const attrs = ['role', 'aria-modal', 'aria-expanded', 'aria-label', 'title'].map((name) => `${name}=${node.getAttribute?.(name) || ''}`).join('|');
@@ -218,6 +229,7 @@
     findReplyDisclosureControls,
     findLoadMoreControls,
     findCommentMenu,
+    findCommentMenuResult,
     captureActionSurfaceState,
     findActionSurface,
     findDeleteAction,
