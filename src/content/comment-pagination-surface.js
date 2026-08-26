@@ -94,14 +94,17 @@
       const durationMs = Math.max(360, Math.min(1400, distance / speedPxPerSecond * 1000));
       const frame = global.requestAnimationFrame || ((callback) => global.setTimeout(() => callback(Date.now()), 16));
       const cancelFrame = global.cancelAnimationFrame || global.clearTimeout;
-      const startedAt = Date.now();
+      // requestAnimationFrame 的时间戳使用 performance 时间基准，不能与 Date.now() 混用。
+      let startedAt = null;
       let frameId = null;
       let frames = 0;
       return new Promise((resolve) => {
         const finish = (ok, cancelled = false) => { if (frameId !== null) cancelFrame(frameId); resolve({ ok, cancelled, startTop, targetTop, initialMaxTop, durationMs, frames, actualTop: Number(scroller.scrollTop) || 0 }); };
         const tick = (timestamp) => {
           if (!isActive() || !scroller.isConnected || !isCurrent(scroller)) return finish(false, true);
-          const elapsed = Math.max(0, Number(timestamp) - startedAt);
+          const frameTime = Number(timestamp);
+          if (!Number.isFinite(startedAt)) startedAt = Number.isFinite(frameTime) ? frameTime : Date.now();
+          const elapsed = Math.max(0, (Number.isFinite(frameTime) ? frameTime : Date.now()) - startedAt);
           const progress = Math.min(1, elapsed / durationMs);
           scroller.scrollTop = startTop + distance * progressAt(progress);
           frames += 1;
