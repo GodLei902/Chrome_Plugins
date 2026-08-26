@@ -22,6 +22,7 @@ class FakeElement {
   setAttribute(name, value) { this.attrs[name] = String(value); }
   matches(selector) {
     return selector.split(',').some((part) => {
+      if (part === 'a[href*="/c/"]') return this.tagName === 'A' && String(this.attrs.href || '').includes('/c/');
       const role = part.match(/^\[role="([^"]+)"\]$/)?.[1];
       if (role) return this.attrs.role === role;
       if (part === 'button') return this.tagName === 'BUTTON';
@@ -60,23 +61,64 @@ function replyButton(label = '随机文案') {
   return new FakeElement('button').append(new FakeElement('div').append(new FakeElement('div'), new FakeElement('span', {}, label)));
 }
 
-test('同结构回复入口不依赖语言或文字，普通回复按钮不会命中', () => {
+test('回复展开控件优先匹配正则文案，不把同结构普通回复按钮当成展开入口', () => {
   const { api } = load();
   const shaped = replyButton('随机文案');
+  const expander = new FakeElement('button', {}, '查看所有2条回复');
   const ordinary = new FakeElement('button', {}, '回复');
   assert.equal(api.isReplyDisclosureShape(shaped), true);
   assert.equal(api.isReplyDisclosureShape(ordinary), false);
-  assert.equal(api.findReplyDisclosureControls(shaped).length, 1);
+  assert.equal(api.isExpansionControl(shaped), false);
+  assert.equal(api.isExpansionControl(expander), true);
+  const wrapper = new FakeElement('div').append(shaped, ordinary, expander);
+  const controls = api.findReplyDisclosureControls(wrapper);
+  assert.equal(controls.length, 1);
+  assert.equal(controls[0], expander);
 });
 
-test('回复入口出现同级 ul 后被视为已展开', () => {
+test('回复入口通过 aria-expanded 判断已展开，不依赖 ul', () => {
   const { api } = load();
-  const wrapper = new FakeElement('div');
-  const control = replyButton('查看所有2条回复');
-  const list = new FakeElement('ul');
-  wrapper.append(control, list);
+  const control = new FakeElement('button', { 'aria-expanded': 'true' }, '查看所有2条回复');
   assert.equal(api.isExpandedReplyDisclosure(control), true);
+  const wrapper = new FakeElement('div').append(control);
   assert.equal(api.findReplyDisclosureControls(wrapper).length, 0);
+});
+
+test('评论行定位会越过普通回复按钮，直到找到正则匹配的展开入口', () => {
+  const { api } = load();
+  const link = new FakeElement('a', { href: '/p/example/c/101/' }, '作者');
+  const body = new FakeElement('div').append(link, new FakeElement('button', {}, '回复'));
+  const row = new FakeElement('div').append(body, new FakeElement('button', {}, '查看所有2条回复'));
+  const surface = new FakeElement('main').append(row);
+  assert.equal(api.findCommentRow(link), row);
+  assert.equal(surface.children.length, 1);
+});
+
+test('回复父级按 DOM 顺序和明确缩进推断，不依赖 ul', () => {
+  const { api } = load();
+  const nodes = ['1', '2', '3', '4'].map((id) => new FakeElement('a', { href: `/p/example/c/${id}/` }));
+  nodes.forEach((node, index) => {
+    node.getBoundingClientRect = () => ({ left: [40, 72, 104, 40][index], width: 24, height: 24 });
+    node.compareDocumentPosition = (other) => nodes.indexOf(node) < nodes.indexOf(other) ? 4 : 2;
+  });
+  const ids = api.deriveReplyParentIds(nodes.map((anchor) => ({ id: anchor.getAttribute('href').match(/c\/(\d+)/)[1], anchor })));
+  assert.equal(ids.get('2'), '1');
+  assert.equal(ids.get('3'), '2');
+  assert.equal(ids.has('4'), false);
+});
+
+test('回复位于正则展开控件之后时，优先归属控件前的一级评论', () => {
+  const { api } = load();
+  const parentLink = new FakeElement('a', { href: '/p/example/c/1/' });
+  const control = new FakeElement('button', {}, '查看所有2条回复');
+  const replyLink = new FakeElement('a', { href: '/p/example/c/2/' });
+  const row = new FakeElement('div').append(parentLink, control, replyLink);
+  parentLink.compareDocumentPosition = (other) => other === control || other === replyLink ? 4 : 2;
+  control.compareDocumentPosition = (other) => other === replyLink ? 4 : 2;
+  replyLink.compareDocumentPosition = (other) => other === parentLink || other === control ? 2 : 0;
+  const ids = api.deriveReplyParentIds([{ id: '1', anchor: parentLink, element: row }, { id: '2', anchor: replyLink, element: row }]);
+  assert.equal(ids.get('2'), '1');
+  assert.equal(ids.has('1'), false);
 });
 
 test('评论菜单优先使用评论行内 SVG 结构并递归读取子级标签', () => {

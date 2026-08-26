@@ -45,12 +45,98 @@
       && !normalize(marker.textContent) && label?.tagName === 'SPAN');
   }
 
-  function replyContainer(node) {
-    let current = node?.parentElement;
-    for (let depth = 0; current && depth < 4; depth += 1, current = current.parentElement) {
-      const children = [...(current.children || [])];
-      if (children.some((child) => child !== node && child.tagName === 'UL')) return current;
+  function isReplyDisclosureControl(node, languageHints) {
+    return visible(node) && match('replyDisclosure', node, languageHints).matched;
+  }
+
+  function commentLinksIn(node) {
+    if (!node?.querySelectorAll) return [];
+    const links = [...node.querySelectorAll('a[href*="/c/"]')];
+    if (node.matches?.('a[href*="/c/"]')) links.push(node);
+    return [...new Set(links)].filter((link) => String(link.getAttribute?.('href') || '').match(/\/c\/\d+(?:\/|$)/));
+  }
+
+  function commentIdFromUrl(value) {
+    return String(value || '').match(/\/c\/(\d+)(?:\/|$)/)?.[1] || '';
+  }
+
+  function findCommentRow(link, languageHints) {
+    let row = null;
+    for (let depth = 0, node = link; node && depth < 20; depth += 1, node = node.parentElement) {
+      if (['BODY', 'HTML', 'MAIN'].includes(String(node.tagName || '').toUpperCase())) break;
+      const links = commentLinksIn(node);
+      if (links.length !== 1) break;
+      row = node;
+      // 继续越过普通“回复”按钮，直到找到正则明确匹配的展开入口。
+      const disclosure = controlsIn(node).filter((control) => isReplyDisclosureControl(control, languageHints));
+      if (disclosure.length === 1) return node;
     }
+    return row;
+  }
+
+  function compareDomOrder(left, right) {
+    const leftNode = left?.anchor || left?.element;
+    const rightNode = right?.anchor || right?.element;
+    if (leftNode === rightNode) return 0;
+    const position = leftNode?.compareDocumentPosition?.(rightNode) || 0;
+    if (position & 4) return -1;
+    if (position & 2) return 1;
+    return 0;
+  }
+
+  function elementLeft(entry) {
+    const rect = (entry?.anchor || entry?.element)?.getBoundingClientRect?.();
+    const left = Number(rect?.left);
+    return Number.isFinite(left) ? left : null;
+  }
+
+  function isBefore(left, right) {
+    return Boolean(left?.compareDocumentPosition?.(right) & 4);
+  }
+
+  function disclosureParentId(entry) {
+    const anchor = entry?.anchor;
+    for (let depth = 0, node = entry?.element || anchor; node && depth < 20; depth += 1, node = node.parentElement) {
+      if (['BODY', 'HTML', 'MAIN'].includes(String(node.tagName || '').toUpperCase())) break;
+      const links = commentLinksIn(node);
+      const controls = controlsIn(node).filter((control) => isReplyDisclosureControl(control)
+        || control.getAttribute?.('aria-expanded') === 'true');
+      for (const control of controls) {
+        const owner = links.filter((link) => link !== anchor && isBefore(link, control)).pop();
+        const id = commentIdFromUrl(owner?.getAttribute?.('href'));
+        if (id) return id;
+      }
+    }
+    return '';
+  }
+
+  function deriveReplyParentIds(entries, tolerancePx = 8) {
+    const parentIds = new Map();
+    const stack = [];
+    const tolerance = Math.max(0, Number(tolerancePx) || 0);
+    const ordered = [...(entries || [])].filter((entry) => entry?.id).sort(compareDomOrder);
+    ordered.forEach((entry) => {
+      const parentId = disclosureParentId(entry);
+      if (parentId && parentId !== String(entry.id)) parentIds.set(String(entry.id), parentId);
+    });
+    for (const entry of ordered) {
+      if (parentIds.has(String(entry.id))) continue;
+      const left = elementLeft(entry);
+      // 当前页面没有 ul 层级时，仅在几何缩进提供明确证据时建立父级；
+      // 缺少证据则保持一级评论，避免猜测后删除错误对象。
+      if (left == null) {
+        stack.length = 0;
+        continue;
+      }
+      while (stack.length && left <= stack[stack.length - 1].left + tolerance) stack.pop();
+      const parent = stack[stack.length - 1];
+      if (parent && left > parent.left + tolerance) parentIds.set(String(entry.id), parent.id);
+      stack.push({ id: String(entry.id), left });
+    }
+    return parentIds;
+  }
+
+  function replyContainer(node) {
     return node?.parentElement || null;
   }
 
@@ -58,8 +144,11 @@
     const aria = node?.getAttribute?.('aria-expanded');
     if (aria === 'true') return true;
     if (aria === 'false') return false;
-    const container = replyContainer(node);
-    return Boolean(container && [...container.children || []].some((child) => child.tagName === 'UL' && visible(child)));
+    const controls = node?.getAttribute?.('aria-controls');
+    if (controls && global.document?.getElementById) {
+      return controls.split(/\s+/).filter(Boolean).some((id) => visible(global.document.getElementById(id)));
+    }
+    return false;
   }
 
   function match(type, node, languageHints) {
@@ -73,17 +162,13 @@
       if (ancestor.id === 'icc-host' || ['dialog', 'menu', 'listbox'].includes(ancestor.getAttribute?.('role'))) return false;
       ancestor = ancestor.parentElement;
     }
-    return isReplyDisclosureShape(node) || match('replyDisclosure', node, languageHints).matched
+    return match('replyDisclosure', node, languageHints).matched
       || match('hiddenComments', node, languageHints).matched || match('loadMore', node, languageHints).matched;
   }
 
   function findReplyDisclosureControls(root, commentRow, languageHints) {
     const scope = commentRow || root;
-    const candidates = controlsIn(scope).filter((node) => isExpansionControl(node, languageHints));
-    const shaped = candidates.filter(isReplyDisclosureShape);
-    // 结构候选唯一时优先使用结构；文字只在结构缺失或冲突时兜底。
-    if (shaped.length) return shaped.filter((node) => !isExpandedReplyDisclosure(node));
-    return candidates.filter((node) => !isExpandedReplyDisclosure(node));
+    return controlsIn(scope).filter((node) => isExpansionControl(node, languageHints) && !isExpandedReplyDisclosure(node));
   }
 
   function findLoadMoreControls(root, languageHints) {
@@ -199,7 +284,7 @@
       expanded: isExpandedReplyDisclosure(control),
       ariaExpanded: control?.getAttribute?.('aria-expanded') || '',
       container,
-      containerHasList: Boolean(container && [...(container.children || [])].some((child) => child.tagName === 'UL')),
+      containerSignature: elementSignature(container),
       signature: elementSignature(control),
     };
   }
@@ -209,9 +294,10 @@
     const newId = [...ids].some((id) => id && !before?.ids?.has(id));
     const control = current.control || before?.control;
     const ariaChanged = before?.ariaExpanded === 'false' && control?.getAttribute?.('aria-expanded') === 'true';
-    const listAppeared = Boolean(before?.container && [...(before.container.children || [])].some((child) => child.tagName === 'UL' && visible(child))) || Boolean(before?.containerHasList === false && current.containerHasList);
     const changed = control && (!control.isConnected || !visible(control) || elementSignature(control) !== before?.signature);
-    return { ok: Boolean(newId || ariaChanged || listAppeared || (changed && (current.stable === true || current.stableSnapshot))), newId, listAppeared, ariaChanged, changed };
+    const containerChanged = before?.container && current.containerSignature && before.containerSignature !== current.containerSignature;
+    const stableChange = current.stable === true || current.stableSnapshot;
+    return { ok: Boolean(newId || ariaChanged || (changed && stableChange) || (containerChanged && stableChange)), newId, containerChanged, ariaChanged, changed };
   }
 
   function waitForDeleteResult(commentId, current = {}) {
@@ -224,6 +310,9 @@
     visible,
     getAccessibleLabels: accessibleLabels,
     isReplyDisclosureShape,
+    isReplyDisclosureControl,
+    findCommentRow,
+    deriveReplyParentIds,
     isExpandedReplyDisclosure,
     isExpansionControl,
     findReplyDisclosureControls,

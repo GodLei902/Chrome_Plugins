@@ -209,6 +209,8 @@
     return [...new Set(links)].filter((link) => commentIdFromUrl(link.getAttribute('href')));
   }
   function commentRowForLink(link) {
+    const platformRow = globalThis.InstagramControlLocator?.findCommentRow?.(link);
+    if (platformRow) return platformRow;
     // Instagram 当前版本没有稳定的评论 class；以“祖先只包含当前评论链接”为行边界，
     // 这样展开的回复列表会自然形成独立行，不需要读取接口或内部 JSON。
     let node = link; let row = null;
@@ -248,15 +250,15 @@
       if (!id || !row || !visible(row) || entries.has(id)) continue;
       const username = rowUsername(row); const commentText = rowCommentText(row, username);
       if (!username || !commentText) continue;
-      entries.set(id, { id, parentId: '', username, text: commentText, childCount: 0, isReply: Boolean(link.closest('ul')), element: row });
+      entries.set(id, { id, parentId: '', username, text: commentText, childCount: 0, isReply: false, element: row, anchor: link });
     }
     const all = [...entries.values()];
-    const parents = all.filter((item) => !item.isReply);
-    all.filter((item) => item.isReply).forEach((reply) => {
-      // 回复 DOM 紧跟所属一级评论之后；取其之前最近的一级评论作为父级，
-      // 仅用于“先回复后一级”的排序和作者保护，不猜测未渲染的评论。
-      const previous = parents.filter((parent) => (parent.element.compareDocumentPosition(reply.element) & 4) !== 0).pop();
-      if (previous) reply.parentId = previous.id;
+    const parentIds = globalThis.InstagramControlLocator?.deriveReplyParentIds?.(all) || new Map();
+    all.forEach((item) => {
+      item.parentId = parentIds.get(item.id) || '';
+      item.isReply = Boolean(item.parentId);
+      // DOM 锚点只用于本次父子关系推断，不进入长期会话记录。
+      delete item.anchor;
     });
     return all;
   }
@@ -474,7 +476,7 @@
       const expanded = await waitForCondition(() => {
         const currentIds = new Set(visibleCommentLinks().map((link) => commentIdFromUrl(link.getAttribute('href'))));
         const stable = run.stability.mutationVersion > beforeMutationVersion && !findLoadingIndicator(run.stability.surface || document);
-        const result = locator?.waitForExpansionResult?.(beforeState, { control, commentIds: currentIds, stable })
+        const result = locator?.waitForExpansionResult?.(beforeState, { control, commentIds: currentIds, containerSignature: locator?.elementSignature?.(beforeState.container), stable })
           || { ok: currentIds.size > beforeIds.size || (!control.isConnected && stable) };
         return result.ok;
       }, 8000, '正在展开回复并加载更多评论...');
@@ -712,7 +714,7 @@
       if (!link) return true;
       if (!expectedText) return false;
       // ID 是首选确认信号；只有旧页面无法提供 ID 时才使用作者+正文的兼容回退。
-      return !normalizedText(link.closest('li,article,ul,div') || link).includes(expectedText);
+      return !normalizedText(link.closest('li,article,div') || link).includes(expectedText);
     }, 7000, '正在确认回复已删除...');
     if (!removed) return false;
     const settled = await waitForStableSurface({ timeoutMs: stabilityDefaults.postDeleteSettleTimeoutMs, requireData: false, reason: '正在等待删除后的评论区稳定...' });
@@ -737,7 +739,7 @@
       const currentIds = new Set(visibleCommentLinks().map((link) => commentIdFromUrl(link.getAttribute('href'))));
       if (currentIds.has(String(candidate.id || ''))) return true;
       const stable = run.stability.mutationVersion > beforeMutationVersion && !findLoadingIndicator(run.stability.surface || document);
-      return Boolean(locator?.waitForExpansionResult?.(beforeState, { control, commentIds: currentIds, stable })?.ok);
+      return Boolean(locator?.waitForExpansionResult?.(beforeState, { control, commentIds: currentIds, containerSignature: locator?.elementSignature?.(beforeState.container), stable })?.ok);
     }, 8000, '正在展开目标一级评论的子级内容...');
   }
   async function remove(candidate) {
