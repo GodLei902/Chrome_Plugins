@@ -3,6 +3,7 @@
 
   // 控件适配器负责查找和操作“加载更多”入口；语言匹配规则由平台实现注入。
   function defaultLabel(node) {
+    if (global.InstagramControlLocator?.getAccessibleLabels) return global.InstagramControlLocator.getAccessibleLabels(node).join(' ');
     const values = [node?.innerText, node?.textContent, node?.getAttribute?.('aria-label'), node?.getAttribute?.('title')];
     node?.querySelectorAll?.('[aria-label],[title]').forEach((child) => values.push(child.getAttribute('aria-label'), child.getAttribute('title')));
     return [...new Set(values.map((value) => String(value || '').replace(/\s+/g, ' ').trim()).filter(Boolean))].join(' ');
