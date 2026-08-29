@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "社交评论清理器",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Safely clean keyword-matched comments from one configured Instagram post.",
   "icons": {
     "16": "assets/icons/icon-16.png",
