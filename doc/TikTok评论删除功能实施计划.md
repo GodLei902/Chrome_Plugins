@@ -101,6 +101,8 @@ TikTok 评论记录使用当前核心已有字段：
 
 每个阶段的验收记录至少包含：提交号、执行命令及结果、fixture 名称、真实页面的页面类型和测试批量、Preview/实际结果，以及任何暂停原因。记录不得包含账号名称、评论正文、DOM 快照或菜单文本。仅修改文档的阶段不需要执行 `node --check`；所有包含 JavaScript 改动的阶段均须执行第 5.1 节的公共命令。
 
+每个阶段的人工验收统一使用未打包扩展：先在设置页保存完整 TikTok 目标 URL，再到 `chrome://extensions` 重新加载扩展，随后刷新或重新打开目标作品页，最后从页面浮动面板执行本阶段允许的 Preview 或 Start。仅重新加载扩展不会向已打开页面重新注入内容脚本；刷新目标页是人工验收的必要步骤。每个阶段均须给出可观察的页面结果，不能把页面可运行入口推迟到后续阶段。
+
 ### 阶段 0：冻结双平台回归基线
 
 **目标：** 固定当前 Instagram 行为，记录 TikTok 参考边界。
@@ -117,28 +119,34 @@ TikTok 评论记录使用当前核心已有字段：
 
 **提交边界：** `冻结TikTok接入基线`
 
-### 阶段 1：建立 TikTok 身份和注册能力
+### 阶段 1：建立可重载的 TikTok 测试入口与安全身份插件
 
-**目标：** 让后台、设置页和内容脚本可通过注册中心识别 TikTok，但尚不执行页面动作。
+**目标：** 让 TikTok 从本阶段起可被重新加载后的扩展识别、注入和安全启动，为后续每一阶段的真实页面验收提供固定入口；本阶段不得扫描、展开、打开菜单或删除。
 
-- 新增 `identity.js`、`errors.js`、`plugin.js`，注册 `id: 'tiktok'`、显示名、目标 URL placeholder 和能力声明。
+- 新增 `identity.js`、`preflight.js`、`errors.js`、`plugin.js`，注册 `id: 'tiktok'`、显示名、目标 URL placeholder 和能力声明。`checkTarget()` 必须确认当前完整作品 URL；其他未实现能力均返回标准 `unsupported`，不返回伪成功。
 - 严格规范化完整的 `www.tiktok.com/@<creator>/video/<id>` 地址，清除查询参数；拒绝短链、个人主页和非 `www` host。
-- 页面 DOM 能力未加载时，插件方法必须返回 `unsupported`，与 Instagram 插件的后台安全包装方式一致。
-- 新增 TikTok URL、页面匹配、注册、错误分类和完整契约测试。
+- 为满足完整 `PlatformPlugin` 契约，插件必须提供所有方法组的安全占位函数；未接入的方法返回 `unsupported`。不在阶段 1 创建可执行的删除动作或依赖 Instagram DOM 模块。
+- Manifest 在本阶段新增独立 TikTok `content_scripts` 条目和最小 `https://www.tiktok.com/*` 权限。TikTok 脚本链加载 shared/core、TikTok identity/preflight/errors/plugin、`content-entry` 和现有页面面板，不加载 Instagram DOM 模块。
+- Service Worker 与设置页在本阶段加载 TikTok identity/plugin，使注册中心可解析 TikTok URL、后台可找到目标标签页、设置页可保存 `platformId: 'tiktok'`。插件在非页面上下文不得触碰 TikTok DOM。
+- 后续阶段新增 `src/platform/tiktok/` 页面模块时，必须在同一提交中把该模块插入 TikTok 脚本链的 plugin 之前；页面人工验收以重新加载扩展并刷新作品页为准。
+- 新增 TikTok URL、页面匹配、注册、错误分类、完整契约和跨上下文安全占位测试。
 
 **测试与推进门禁：**
 
 - 自动化测试覆盖完整 URL 的规范化、查询参数清除、错误 host、短链、个人页、插件注册、能力声明、`unsupported` 安全返回和错误分类；既有 Instagram 测试全量通过。
-- 对注册中心、后台目标路由和设置页目标解析进行非 DOM 集成测试，确认 TikTok 仅能被识别，尚不能触发 TikTok 页面动作。
-- 当前阶段不得修改 Manifest、内容脚本加载链或 Instagram 平台目录；差异审查通过后才可开始阶段 2。
+- 对注册中心、后台目标路由和设置页目标解析进行非 DOM 集成测试，确认三处均可解析同一 TikTok 规范化 URL。
+- 按统一页面验收流程重载扩展并刷新测试作品页：浮动面板必须出现；保存 TikTok 目标后，Preview/Start 只能给出明确的“能力尚未实现”暂停结果，页面评论区不得被扫描、展开、打开菜单或删除。
+- 检查 TikTok 独立脚本链与 Manifest 权限正确生效，同时 Instagram 脚本数组、权限、面板和 Preview 冒烟测试保持不变；通过后才可开始阶段 2。
 
-**提交边界：** `新增TikTok身份插件`
+**提交边界：** `接入TikTok测试入口`
 
 ### 阶段 2：实现评论页签、评论面和记录解析
 
 **目标：** 在不接入删除动作前，完成安全的 TikTok Preview 基础。
 
 - 新增 `dom.js`、`surface.js`、`comments.js`。
+- 在同一提交中将上述模块加入 TikTok 内容脚本链，并置于 TikTok `plugin.js` 之前；重新加载扩展、刷新目标页后必须实际加载新模块。
+- 在 `plugin.js` 中将 surface、comments 以及 Preview 必经的无副作用方法替换为上述实现：`actions.resolveElement()` 只能返回当前记录的短期元素，`loader.createPagination()` 返回空分页或当前运行时可接受的无加载状态，`loader.expandAll()` 与 `loader.expandParent()` 只能返回“尚未展开”的成功结果。唯一且明确的评论页签切换是本阶段唯一允许的页面点击；菜单、确认、删除、自动加载和其他页面点击仍返回 `unsupported`。
 - 页面初始位于非评论页签时，只点击唯一评论页签，并通过当前 `WaitCoordinator` 等待评论节点出现、Mutation 去抖和连续稳定快照。
 - `surface` 完整实现当前 `findCommentSurface`、滚动面、观察器、快照、可见性、滚动状态和 `waitUntilStable` 方法。
 - 一级评论映射为 `root`，所有可证明归属于同一一级评论的二级及更深扁平回复映射为 `reply`；没有唯一父级时暂停。
@@ -147,7 +155,7 @@ TikTok 评论记录使用当前核心已有字段：
 **测试与推进门禁：**
 
 - fixture 测试覆盖评论页签延迟/重复、评论面重复/替换、稳定快照、观察器释放、一级与回复映射、父级缺失、稳定键冲突、Creator 区域误判和节点重绘。
-- 运行时测试确认 Preview 只产生扫描和统计结果，一级评论与 Creator 回复不会成为候选，且不会调用菜单、确认或删除动作。
+- 运行时测试确认 Preview 只产生扫描和统计结果，一级评论与 Creator 回复不会成为候选；同时确认仅调用 `resolveElement()` 和无副作用 loader 方法，菜单、确认、删除和页面点击动作调用次数均为零。
 - 在测试账号作品页完成一次仅 Preview 的浏览器验收：评论页签、稳定等待、解析结果和暂停语义均正确；不满足时只修复阶段 2，不进入回复展开。
 
 **提交边界：** `实现TikTok评论面解析`
@@ -157,6 +165,9 @@ TikTok 评论记录使用当前核心已有字段：
 **目标：** 使用当前核心的“一级评论 -> 展开 -> 扫描 -> 筛选”顺序加载 TikTok 回复。
 
 - 实现 TikTok `loader.expandParent()`，每次只处理当前一级评论线程内一个明确入口。
+- 在同一提交中将 `loader.js` 加入 TikTok 内容脚本链，确保 Preview 的真实页面验收运行的是当前实现，而非阶段 1 的安全占位函数。
+- 在 `plugin.js` 中将 loader 方法组替换为当前实现；保留阶段 2 的 `actions.resolveElement()`，其余 actions 继续返回 `unsupported`，确保本阶段页面只能展开和扫描，不能打开菜单或删除。
+- `createPagination()` 继续返回无分页状态，`loadNextBatch()` 不得被启用；自动加载、结束判断和刷新恢复只在阶段 5 接入，防止回复展开验收混入分页行为。
 - 每次点击前后通过现有 `coordinateAction`、全局限频、可取消等待、Mutation 与稳定快照确认新增回复或明确展开状态。
 - 节点替换后必须重新定位当前父评论和展开入口；无进展、超时、重复入口或取消均停止本轮。
 - Preview 允许展开回复用于统计，但不得调用 actions 菜单或删除方法。
@@ -174,6 +185,7 @@ TikTok 评论记录使用当前核心已有字段：
 **目标：** 让当前核心的统一删除模板可安全调用 TikTok 插件。
 
 - 实现 `resolveElement`、`ensureReplyVisible`、`revealMenu`、`getMenu`、`findDeleteAction`、`confirmDelete`、`verifyDeleted` 和悬停点。
+- 在同一提交中将 `actions.js` 加入 TikTok 内容脚本链，并在 `plugin.js` 中仅替换对应 actions 方法组；其他未实现方法仍维持安全占位。
 - 只允许当前行唯一的菜单入口、当前新打开菜单唯一的删除入口、当前确认弹层唯一且明确的确认动作。
 - 删除后等待目标稳定键从当前评论面消失，并等待评论面稳定；无法确认时不得更新 `deleted` 或 `processedIds`。
 - 二次确认结构以测试账号页面为准；development 的选择器不匹配时返回 `ambiguous`，不得扩大选择范围。
@@ -204,23 +216,22 @@ TikTok 评论记录使用当前核心已有字段：
 
 **提交边界：** `接入TikTok评论分页`、`验证TikTok续跑恢复`
 
-### 阶段 6：接入页面脚本、设置与最小权限
+### 阶段 6：完成双平台集成、文档与发布前验收
 
-**目标：** 仅在插件能力和测试完成后对用户开放 TikTok。
+**目标：** 验证阶段 1 至阶段 5 已形成完整、可重载、跨上下文一致的 TikTok 接入，并完成用户可见说明；本阶段不再以“接入后才能测试”为前提。
 
-- Manifest 新增独立 TikTok `content_scripts` 条目和最小 `https://www.tiktok.com/*` 权限；Instagram 脚本数组和权限保持不变。
-- TikTok 脚本链加载同一份 shared/core 文件和 TikTok 插件文件，不加载 Instagram DOM 模块。
-- Service Worker 与设置页加载 TikTok identity/plugin，使注册中心能按目标 URL 路由；不加载 TikTok 页面 DOM 模块。
+- 核对 Manifest 中 TikTok 独立内容脚本、最小 `https://www.tiktok.com/*` 权限和全量脚本顺序；确认每个已实现的 TikTok 页面模块都在 plugin 之前加载，且 TikTok 脚本链不加载 Instagram DOM 模块。
+- 核对 Service Worker 与设置页只加载 TikTok identity/plugin，后台和设置页不加载 TikTok 页面 DOM 模块；确认三处注册中心对相同目标 URL 的平台判定一致。
 - 设置页沿用当前按目标 URL 解析平台的方式，保留已有通用节奏、关键词、白名单、限频和会话字段；更新 Instagram 单平台提示为中性文案。
 - README 与操作文档明确 TikTok 已验证页面范围、Preview/Start 差异、最小权限和测试账号边界。
 
 **测试与推进门禁：**
 
-- 校验 Manifest 为 V3，TikTok 只使用独立的 `https://www.tiktok.com/*` 匹配和权限；检查 TikTok 脚本链加载顺序、后台/设置页不加载 TikTok DOM 模块，以及 Instagram 原脚本数组和权限字节级未变。
+- 校验 Manifest 为 V3，TikTok 只使用阶段 1 已接入的独立 `https://www.tiktok.com/*` 匹配和权限；检查 TikTok 脚本链加载顺序、后台/设置页不加载 TikTok DOM 模块，以及 Instagram 原脚本数组和权限字节级未变。
 - 加载未打包扩展，分别完成 TikTok 与 Instagram 的启动、Preview、Pause/Stop 冒烟测试；TikTok 还须复跑阶段 4 和阶段 5 的测试账号用例，Instagram 不得出现路由、面板或删除语义回归。
 - 执行完整 `npm test`、所有修改 JavaScript 的 `node --check` 和 `git diff --check`。仅在自动化、双平台浏览器验收和文档审查全部通过后，才可将 TikTok 标为已支持并进入发布准备。
 
-**提交边界：** `接入TikTok内容脚本`、`更新TikTok支持说明`
+**提交边界：** `完成TikTok集成验收`、`更新TikTok支持说明`
 
 ## 5. 测试与验收门禁
 
