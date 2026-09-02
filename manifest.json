@@ -12,7 +12,8 @@
   "permissions": ["storage", "tabs", "alarms"],
   "host_permissions": [
     "https://www.instagram.com/*",
-    "https://instagram.com/*"
+    "https://instagram.com/*",
+    "https://www.tiktok.com/*"
   ],
   "background": {
     "service_worker": "src/background/service-worker.js"
@@ -35,6 +36,11 @@
         "https://instagram.com/*"
       ],
       "js": ["src/shared/url.js", "src/shared/delay-generator.js", "src/shared/scheduled-rest.js", "src/shared/task-session.js", "src/shared/action-pace-config.js", "src/shared/backoff.js", "src/shared/action-pace-controller.js", "src/shared/rate-limiter.js", "src/shared/comment-types.js", "src/shared/comment-surface-stability.js", "src/platform/contract.js", "src/platform/registry.js", "src/platform/instagram/identity.js", "src/core/candidate-policy.js", "src/core/task-session.js", "src/core/wait-coordinator.js", "src/core/ui-model.js", "src/core/runtime-transport.js", "src/core/cleaner-runtime.js", "src/core/platform-settings.js", "src/platform/instagram/pagination-surface.js", "src/platform/instagram/control-labels.js", "src/platform/instagram/control-locator.js", "src/platform/instagram/pagination-controls.js", "src/platform/instagram/pagination-loader.js", "src/platform/instagram/reply-expansion.js", "src/platform/instagram/surface.js", "src/platform/instagram/comments.js", "src/platform/instagram/loader.js", "src/platform/instagram/preflight.js", "src/platform/instagram/errors.js", "src/platform/instagram/actions.js", "src/platform/instagram/plugin.js", "src/core/content-entry.js", "src/content/floating-panel-state.js", "src/content/cleaner-panel.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://www.tiktok.com/*"],
+      "js": ["src/shared/url.js", "src/shared/delay-generator.js", "src/shared/scheduled-rest.js", "src/shared/task-session.js", "src/shared/action-pace-config.js", "src/shared/backoff.js", "src/shared/action-pace-controller.js", "src/shared/rate-limiter.js", "src/shared/comment-types.js", "src/shared/comment-surface-stability.js", "src/platform/contract.js", "src/platform/registry.js", "src/platform/tiktok/identity.js", "src/core/candidate-policy.js", "src/core/task-session.js", "src/core/wait-coordinator.js", "src/core/ui-model.js", "src/core/runtime-transport.js", "src/core/cleaner-runtime.js", "src/core/platform-settings.js", "src/platform/tiktok/preflight.js", "src/platform/tiktok/errors.js", "src/platform/tiktok/plugin.js", "src/core/content-entry.js", "src/content/floating-panel-state.js", "src/content/cleaner-panel.js"],
       "run_at": "document_idle"
     }
   ]

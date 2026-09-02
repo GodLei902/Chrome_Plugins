@@ -1,4 +1,4 @@
-importScripts('../shared/rate-limiter.js', '../shared/task-session.js', '../platform/contract.js', '../platform/registry.js', '../platform/instagram/identity.js', '../platform/instagram/plugin.js');
+importScripts('../shared/rate-limiter.js', '../shared/task-session.js', '../platform/contract.js', '../platform/registry.js', '../platform/instagram/identity.js', '../platform/instagram/plugin.js', '../platform/tiktok/identity.js', '../platform/tiktok/plugin.js');
 
 const SNAPSHOT_PREFIX = 'socialTaskSession:';
 const LOCK_PREFIX = 'socialTaskLock:';
