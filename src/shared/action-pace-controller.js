@@ -33,5 +33,5 @@
       }
     }
   }
-  global.InstagramCommentPaceController = ActionPaceController;
+  global.SocialCommentActionPaceController = ActionPaceController;
 })(globalThis);

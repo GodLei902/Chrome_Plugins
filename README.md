@@ -60,20 +60,16 @@ flowchart TD
 
 ### 当前插件化状态
 
-阶段 0 已完成：
+阶段 0 至阶段 5 已完成：
 
 - `src/platform/contract.js`：标准能力、错误类别和动作结果。
 - `src/platform/registry.js`：插件注册、查找和按目标 URL 解析。
 - `src/platform/instagram/identity.js`：Instagram `/p/` 和 `/reel/` 地址规范化。
-- `src/platform/instagram/plugin.js`：Instagram 插件元数据和迁移占位适配层。
+- `src/platform/instagram/plugin.js`：Instagram 插件注册和页面能力组装。
+- `src/platform/instagram/{surface,comments,loader,preflight,actions,errors}.js`：评论面、解析、展开/分页、前置检查、删除动作和异常分类。
+- `src/core/{cleaner-runtime,task-session,wait-coordinator,ui-model,runtime-transport}.js`：通用任务编排、可取消等待、会话、UI 快照和消息边界。
 
-当前仍由以下兼容运行时执行页面行为：
-
-- `src/content/social-comment-cleaner.js`：扫描、线程构建、预览、删除、暂停/停止和页面面板。
-- `src/content/rules.js`：关键词、白名单、作者保护和回复候选策略。
-- `src/content/comment-pagination-*.js`：评论面发现、加载入口和分页状态。
-
-因此，当前版本已经具备插件化边界，但还没有宣称 Instagram DOM 动作全部迁移到插件目录，也没有接入 TikTok、YouTube 或 Facebook。
+当前页面入口为 `src/content/cleaner-panel.js`，只渲染面板和路由核心命令。候选规则由 `src/core/candidate-policy.js` 统一执行；Instagram 的 DOM 细节已迁移到 `src/platform/instagram/`。当前仍只支持 Instagram，尚未接入 TikTok、YouTube 或 Facebook。
 
 ## 安装
 
@@ -193,10 +189,9 @@ git diff --check
 
 ## 后续路线
 
-1. 将 Instagram URL、评论解析和页面状态进一步迁移到 `platform/instagram/`。
-2. 将现有内容脚本拆分为通用 `TaskSession`、`CleanerRuntime`、等待协调和 UI 快照。
-3. 统一后台消息、配置结构和平台能力声明。
-4. 选择第二个平台进行插件试点，不复制通用运行时。
+1. 使用测试账号执行 Preview 和小批量 Instagram 真实页面验收，并记录页面、批量和结果。
+2. 根据 TikTok 的实际页面结构实现独立插件、精确权限与插件 fixture。
+3. 选择第二个平台进行插件试点，不复制通用运行时。
 
 详细边界和迁移顺序见：[社交评论清理器多平台插件化解耦合重构方案](doc/社交评论清理器多平台插件化解耦合重构方案.md)。
 

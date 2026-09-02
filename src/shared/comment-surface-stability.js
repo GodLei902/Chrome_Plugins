@@ -37,5 +37,5 @@
     );
   }
 
-  global.InstagramCommentSurfaceStability = { DEFAULTS, snapshotSignature, samplesAreStable };
+  global.SocialCommentSurfaceStability = { DEFAULTS, snapshotSignature, samplesAreStable };
 })(globalThis);

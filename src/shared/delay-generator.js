@@ -24,7 +24,5 @@
     return Math.round(seconds * 1000);
   }
   const api = { normalRandom, logNormalSeconds, gammaSeconds, generateDelayMs };
-  // 通用核心使用平台无关名称，旧 Instagram 调用保留兼容别名。
   global.DelayGenerator = api;
-  global.InstagramCommentDelay = api;
 })(globalThis);

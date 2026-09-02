@@ -14,7 +14,7 @@
   }
   function generate(config, random = Math.random) {
     const normalized = normalize(config);
-    const generator = global.DelayGenerator || global.InstagramCommentDelay;
+    const generator = global.DelayGenerator;
     return generator?.generateDelayMs ? generator.generateDelayMs(normalized, random) : Math.round((normalized.minSeconds + random() * (normalized.maxSeconds - normalized.minSeconds)) * 1000);
   }
   global.SocialCommentScheduledRest = { DEFAULTS: { ...DEFAULTS }, MIN_SECONDS, MAX_SECONDS, normalize, generate };

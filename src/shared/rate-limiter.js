@@ -16,5 +16,5 @@
     }
     snapshot() { return { timestamps: [...this.timestamps] }; }
   }
-  global.InstagramCommentRateLimiter = SlidingWindowRateLimiter;
+  global.SocialCommentRateLimiter = SlidingWindowRateLimiter;
 })(globalThis);

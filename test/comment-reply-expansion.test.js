@@ -7,7 +7,7 @@ function load() {
   const context = { globalThis: {}, Set, String, Number, Math, Object, Array };
   context.globalThis = context;
   vm.createContext(context);
-  vm.runInContext(fs.readFileSync('src/content/comment-reply-expansion.js', 'utf8'), context);
+  vm.runInContext(fs.readFileSync('src/platform/instagram/reply-expansion.js', 'utf8'), context);
   return context.InstagramCommentReplyExpansion;
 }
 

@@ -33,6 +33,30 @@ test('插件能力和标准错误结果可被核心消费', () => {
   assert.equal(context.SocialCommentPlatformContract.createPlatformError('future-code', '未知错误').code, 'unknown');
 });
 
+test('Instagram 插件页面能力由独立模块提供，后台环境仍安全返回 unsupported', () => {
+  const plugin = context.SocialCommentPlatformRegistry.get('instagram');
+  const result = plugin.actions.confirmDelete();
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, 'unsupported');
+  assert.equal(typeof plugin.surface.waitUntilStable, 'function');
+  assert.equal(typeof plugin.loader.expandAll, 'function');
+});
+
+test('已注册插件完整实现运行时所需的方法组', () => {
+  const plugin = context.SocialCommentPlatformRegistry.get('instagram');
+  const required = context.SocialCommentPlatformContract.REQUIRED_METHODS;
+  Object.entries(required).forEach(([groupName, methods]) => {
+    methods.forEach((methodName) => assert.equal(typeof plugin[groupName][methodName], 'function', `${groupName}.${methodName}`));
+  });
+});
+
 test('注册中心拒绝缺少契约方法的插件', () => {
   assert.throws(() => context.SocialCommentPlatformRegistry.register({ id: 'broken', displayName: 'Broken', matches: ['https://example.com/*'] }), /缺少方法组/);
+});
+
+test('核心文件不包含平台 URL、DOM 选择器或菜单文案', () => {
+  for (const file of ['src/core/cleaner-runtime.js', 'src/core/candidate-policy.js', 'src/core/task-session.js', 'src/core/wait-coordinator.js', 'src/core/ui-model.js']) {
+    const source = fs.readFileSync(file, 'utf8');
+    assert.equal(/instagram|tiktok|querySelector|\/c\//i.test(source), false, file);
+  }
 });

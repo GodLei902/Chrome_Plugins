@@ -55,8 +55,12 @@
       meanSeconds: (Number(source.cooldownMin) + Number(source.cooldownMax)) / 2,
     } : null), DEFAULTS.rest);
     return {
-      platform: source.platform === 'instagram' ? 'instagram' : 'instagram',
-      targetPostUrl: typeof source.targetPostUrl === 'string' ? source.targetPostUrl.trim() : '',
+      // 平台由注册中心在配置边界补全；共享配置不假设任何具体平台。
+      platform: String(source.platformId || source.platform || ''),
+      platformId: String(source.platformId || source.platform || ''),
+      targetPostUrl: typeof (source.targetUrl || source.targetPostUrl) === 'string' ? String(source.targetUrl || source.targetPostUrl).trim() : '',
+      targetUrl: typeof (source.targetUrl || source.targetPostUrl) === 'string' ? String(source.targetUrl || source.targetPostUrl).trim() : '',
+      platformOptions: source.platformOptions && typeof source.platformOptions === 'object' ? clone(source.platformOptions) : {},
       whitelist: typeof source.whitelist === 'string' ? source.whitelist.trim() : '',
       deleteKeywords: typeof source.deleteKeywords === 'string' ? source.deleteKeywords.trim() : '',
       // 自动加载和正式运行跟随加载固定开启；忽略旧版本保存的开关，避免旧设置改变安全边界。
@@ -114,5 +118,5 @@
     if (settings.sessionLimit !== 'unlimited' && settings.sessionLimit < 1) throw new Error('本次删除上限必须为正数或选择不限。');
     return settings;
   }
-  global.InstagramCommentPaceConfig = { DEFAULTS: clone(DEFAULTS), normalizeSettings, validateSettings };
+  global.SocialCommentPaceConfig = { DEFAULTS: clone(DEFAULTS), normalizeSettings, validateSettings };
 })(globalThis);

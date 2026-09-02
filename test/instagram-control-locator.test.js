@@ -57,8 +57,8 @@ function load() {
   const context = { globalThis: null, document: documentRef };
   context.globalThis = context;
   vm.createContext(context);
-  vm.runInContext(fs.readFileSync('src/content/instagram-control-labels.js', 'utf8'), context);
-  vm.runInContext(fs.readFileSync('src/content/instagram-control-locator.js', 'utf8'), context);
+  vm.runInContext(fs.readFileSync('src/platform/instagram/control-labels.js', 'utf8'), context);
+  vm.runInContext(fs.readFileSync('src/platform/instagram/control-locator.js', 'utf8'), context);
   return { api: context.InstagramControlLocator, labels: context.InstagramControlLabels, documentRef };
 }
 

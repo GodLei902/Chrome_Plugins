@@ -5,5 +5,5 @@
     const jitter = 1 - config.jitterRatio + random() * config.jitterRatio * 2;
     return Math.round(base * jitter * 1000);
   }
-  global.InstagramCommentBackoff = { backoffDelayMs };
+  global.SocialCommentBackoff = { backoffDelayMs };
 })(globalThis);

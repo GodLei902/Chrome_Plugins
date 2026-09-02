@@ -92,8 +92,13 @@
       const distance = targetTop - startTop;
       const speedPxPerSecond = Math.max(420, Math.min(720, Number(scroller.clientHeight) * 1.6));
       const durationMs = Math.max(360, Math.min(1400, distance / speedPxPerSecond * 1000));
-      const frame = global.requestAnimationFrame || ((callback) => global.setTimeout(() => callback(Date.now()), 16));
-      const cancelFrame = global.cancelAnimationFrame || global.clearTimeout;
+      // 浏览器原生动画帧方法需要以 Window 为接收者调用，不能直接提取函数引用。
+      const frame = (callback) => (typeof global.requestAnimationFrame === 'function'
+        ? global.requestAnimationFrame(callback)
+        : global.setTimeout(() => callback(Date.now()), 16));
+      const cancelFrame = (frameId) => (typeof global.cancelAnimationFrame === 'function'
+        ? global.cancelAnimationFrame(frameId)
+        : global.clearTimeout(frameId));
       // requestAnimationFrame 的时间戳使用 performance 时间基准，不能与 Date.now() 混用。
       let startedAt = null;
       let frameId = null;

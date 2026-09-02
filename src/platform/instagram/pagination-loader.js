@@ -2,7 +2,7 @@
   'use strict';
 
   // 加载器只维护批次状态和终止条件，页面 DOM 操作通过 surface/controls 适配器完成。
-  const DEFAULTS = global.InstagramCommentPaceConfig?.DEFAULTS?.pagination || {
+  const DEFAULTS = global.SocialCommentPaceConfig?.DEFAULTS?.pagination || {
     enabled: true,
     maxBatches: 20,
     noGrowthAttempts: 3,

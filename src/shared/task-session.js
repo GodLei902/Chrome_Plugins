@@ -6,8 +6,11 @@
   function clone(value) { return JSON.parse(JSON.stringify(value)); }
   function createId(now = Date.now(), random = Math.random) { return `session-${now.toString(36)}-${Math.floor(random() * 0xFFFFFF).toString(16).padStart(6, '0')}`; }
   function normalizeTarget(target, fallbackUrl = '') {
-    if (target && typeof target === 'object') return { platform: String(target.platform || 'instagram'), normalizedId: String(target.normalizedId || target.url || fallbackUrl), url: String(target.url || fallbackUrl) };
-    return { platform: 'instagram', normalizedId: String(target || fallbackUrl), url: String(fallbackUrl || target || '') };
+    if (target && typeof target === 'object') {
+      const platformId = String(target.platformId || target.platform || '');
+      return { platformId, platform: platformId, normalizedId: String(target.normalizedId || target.canonicalUrl || target.url || fallbackUrl), url: String(target.canonicalUrl || target.url || fallbackUrl) };
+    }
+    return { platformId: '', platform: '', normalizedId: String(target || fallbackUrl), url: String(fallbackUrl || target || '') };
   }
   function create(options = {}) {
     const target = normalizeTarget(options.target, options.targetUrl);

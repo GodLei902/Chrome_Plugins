@@ -69,18 +69,22 @@
     }
   }
 
+  const REQUIRED_METHODS = Object.freeze({
+    identity: ['normalizeTargetUrl', 'isTargetUrl', 'matchesPage', 'getTargetContext', 'getCurrentAccount', 'getContentOwner', 'compareAccounts'],
+    preflight: ['detectLogin', 'detectPageState', 'checkTarget', 'checkDeletePermission', 'getRestrictionReason'],
+    surface: ['findCommentSurface', 'findScrollableSurface', 'observe', 'disconnect', 'getMutationVersion', 'snapshot', 'isVisible', 'getScrollState', 'waitUntilStable'],
+    loader: ['findExpansionControls', 'expand', 'expandAll', 'expandParent', 'findLoadMoreControls', 'loadNextBatch', 'createPagination', 'getProgress', 'hasReachedEnd', 'cancel'],
+    comments: ['collect', 'toRecord', 'getId', 'getParentId', 'isReply', 'getAuthor', 'getText', 'getElement', 'buildThreads', 'getPostAuthor', 'findParent', 'nextParent'],
+    actions: ['resolveElement', 'ensureReplyVisible', 'revealMenu', 'getMenu', 'findDeleteAction', 'confirmDelete', 'verifyDeleted', 'getHoverPoint'],
+    errors: ['classify', 'toUserMessage', 'isRetryable'],
+  });
+
   function validatePlugin(plugin) {
     if (!plugin || typeof plugin !== 'object') throw new TypeError('平台插件必须是对象。');
     if (!/^[a-z][a-z0-9-]*$/.test(String(plugin.id || ''))) throw new TypeError('平台插件 id 无效。');
     if (!String(plugin.displayName || '').trim()) throw new TypeError('平台插件必须提供 displayName。');
     if (!Array.isArray(plugin.matches) || !plugin.matches.length) throw new TypeError('平台插件必须提供 matches。');
-    validateMethodGroup(plugin, 'identity', ['normalizeTargetUrl', 'isTargetUrl', 'matchesPage']);
-    validateMethodGroup(plugin, 'preflight', ['detectLogin', 'detectPageState', 'checkTarget', 'checkDeletePermission']);
-    validateMethodGroup(plugin, 'surface', ['findCommentSurface', 'snapshot']);
-    validateMethodGroup(plugin, 'loader', ['loadNextBatch', 'cancel']);
-    validateMethodGroup(plugin, 'comments', ['collect', 'toRecord', 'getId', 'getParentId', 'isReply', 'getAuthor', 'getText', 'getElement', 'buildThreads']);
-    validateMethodGroup(plugin, 'actions', ['resolveElement', 'ensureReplyVisible', 'revealMenu', 'getMenu', 'findDeleteAction', 'confirmDelete', 'verifyDeleted', 'getHoverPoint']);
-    validateMethodGroup(plugin, 'errors', ['classify', 'toUserMessage', 'isRetryable']);
+    Object.entries(REQUIRED_METHODS).forEach(([groupName, methodNames]) => validateMethodGroup(plugin, groupName, methodNames));
     return {
       ...plugin,
       id: String(plugin.id),
@@ -93,6 +97,7 @@
   global.SocialCommentPlatformContract = Object.freeze({
     ERROR_CODES,
     DEFAULT_CAPABILITIES,
+    REQUIRED_METHODS,
     isErrorCode,
     createPlatformError,
     createActionResult,
