@@ -27,7 +27,7 @@
       supportsReplies: Boolean(global.SocialCommentTikTokComments),
       supportsNestedReplies: false,
       supportsAutoLoad: false,
-      supportsCommentDelete: false,
+      supportsCommentDelete: Boolean(global.SocialCommentTikTokActions),
       requiresAuthorConfirmation: true,
       supportsPreview: Boolean(global.SocialCommentTikTokSurface && global.SocialCommentTikTokComments),
     },
@@ -87,9 +87,12 @@
       nextParent: method('SocialCommentTikTokComments', 'nextParent'),
     },
     actions: {
-      resolveElement: (...args) => global.SocialCommentTikTokComments
-        ? global.SocialCommentTikTokComments.resolveElement(...args)
-        : method('SocialCommentTikTokActions', 'resolveElement')(...args),
+      // 阶段 2/3 未加载动作模块时仍允许 Preview 重新定位父评论；正式动作优先使用阶段 4 的稳定键重定位。
+      resolveElement: (...args) => global.SocialCommentTikTokActions
+        ? global.SocialCommentTikTokActions.resolveElement(...args)
+        : (global.SocialCommentTikTokComments
+          ? global.SocialCommentTikTokComments.resolveElement(...args)
+          : method('SocialCommentTikTokActions', 'resolveElement')(...args)),
       ensureReplyVisible: method('SocialCommentTikTokActions', 'ensureReplyVisible'),
       revealMenu: method('SocialCommentTikTokActions', 'revealMenu'),
       getMenu: method('SocialCommentTikTokActions', 'getMenu'),
