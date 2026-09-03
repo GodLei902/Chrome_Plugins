@@ -106,7 +106,7 @@ test('TikTok 插件完整注册，阶段 1 未实现能力统一返回 unsupport
   }
 });
 
-test('TikTok 预检严格匹配目标并分类登录、挑战、限流和错误页', () => {
+test('TikTok 预检严格匹配目标并分类挑战、限流和错误页，不以登录文案暂停', () => {
   const context = loadTikTokPlugin();
   const plugin = context.SocialCommentPlatformRegistry.get('tiktok');
   const canonical = 'https://www.tiktok.com/@creator/video/1234567890123456789';
@@ -114,7 +114,7 @@ test('TikTok 预检严格匹配目标并分类登录、挑战、限流和错误�
 
   assert.equal(plugin.preflight.checkTarget(page, { canonicalUrl: canonical }).ok, true);
   assert.equal(plugin.preflight.checkTarget(page, { canonicalUrl: 'https://www.tiktok.com/@other/video/1234567890123456789' }).error.code, 'ambiguous');
-  assert.equal(plugin.preflight.detectPageState({ body: { innerText: 'Log in to TikTok' } }).error.code, 'permission');
+  assert.equal(plugin.preflight.detectPageState({ body: { innerText: 'Log in to TikTok' } }).ok, true);
   assert.equal(plugin.preflight.detectPageState({ body: { innerText: 'Complete the security check' } }).error.code, 'challenge');
   assert.equal(plugin.preflight.detectPageState({ body: { innerText: 'Too many requests, try again later' } }).error.code, 'rate-limited');
   assert.equal(plugin.preflight.detectPageState({ body: { innerText: 'Video unavailable' } }).error.code, 'not-found');

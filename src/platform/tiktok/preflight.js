@@ -35,7 +35,7 @@
     return success({ canonicalUrl: actual });
   }
 
-  // 阶段 1 只识别会阻止后续操作的显式页面状态，不读取评论节点或页面内部数据。
+  // 只识别可明确阻止后续操作的风险页；登录文案可能来自推荐内容，不能据此暂停任务。
   function detectPageState(page) {
     const documentRef = documentFor(page);
     if (!documentRef) return failure('not-ready', 'TikTok 页面文档尚未准备完成。');
@@ -45,9 +45,6 @@
     }
     if (/(rate\s*limit|too\s*many\s*requests|try\s*again\s*later|操作过于频繁|请求过多|操作频繁)/i.test(text)) {
       return failure('rate-limited', 'TikTok 操作频繁，请稍后重试。');
-    }
-    if (/(log\s*in|sign\s*in|登录)/i.test(text)) {
-      return failure('permission', 'TikTok 登录已失效或当前页面需要登录。');
     }
     if (/(page\s*(?:is\s*)?not\s*available|couldn'?t\s*find\s*(?:this\s*)?page|video\s*unavailable|作品不存在|页面不存在|无法访问)/i.test(text)) {
       return failure('not-found', 'TikTok 作品页不存在或当前不可访问。');
