@@ -1,10 +1,10 @@
 # 社交评论清理器
 
-一个面向 Chrome 的 MV3 扩展，用于在已登录的 Instagram 帖子或 Reels 页面中，按关键词清理符合条件的子级回复。
+一个面向 Chrome 的 MV3 扩展，用于在已登录的 Instagram 帖子、Reels 或 TikTok 作品页中，按关键词清理符合条件的子级回复。
 
-> 当前版本：`2.0.0` · 当前支持：Instagram · 运行方式：Chrome 扩展
+> 当前版本：`2.0.0` · 代码接入：Instagram、TikTok（TikTok 真实验收待完成）· 运行方式：Chrome 扩展
 >
-> 项目正在进行多平台插件化迁移。当前已经建立平台契约、注册中心和 Instagram 适配层，但实际评论扫描与删除流程仍由现有 Instagram 内容运行时负责。
+> TikTok 已接入与 Instagram 共用的通用运行时。真实平台验收仍必须使用测试账号和本人可管理的作品完成；自动化测试和静态检查不等同于真实删除成功。
 
 v2.0.0 的功能更新见 [v2.0.0 更新简述](doc/v2.0.0更新简述.md)。
 
@@ -14,7 +14,7 @@ v2.0.0 的功能更新见 [v2.0.0 更新简述](doc/v2.0.0更新简述.md)。
 - **回复优先，一级评论保护**：只处理已加载的子级回复，一级评论不会被删除。
 - **白名单和作者保护**：白名单用户、帖子作者自己的评论和回复始终保留。
 - **自动打开目标页面**：从配置页点击开始或预览后，扩展会自动打开并等待目标帖子页面加载。
-- **稳定的 DOM 操作**：只使用页面可见 DOM 和 UI，不读取或重放 Instagram 私有接口。
+- **稳定的 DOM 操作**：只使用页面可见 DOM 和 UI，不读取或重放任何平台的私有接口。
 - **可暂停、可停止、可恢复**：任务保存检查点，页面刷新或扩展重启后可以继续未完成会话。
 - **悬浮面板不遮挡页面**：进入帖子后默认显示贴在右侧边缘的标签式入口；点击入口展开面板，可最小化、关闭或长按拖到其他屏幕边缘。
 - **连续加载与随机节奏**：自动展开可见回复、加载下一批评论，并使用随机等待降低固定操作节奏。
@@ -32,18 +32,18 @@ flowchart TD
     Worker --> Local[(chrome.storage.local\n会话检查点)]
     Worker --> Alarm[chrome.alarms\n下一轮刷新]
     Worker --> Debugger[chrome.debugger\n真实鼠标悬停]
-    Tabs --> Content[Instagram 内容脚本]
+    Tabs --> Content[平台内容脚本]
 
     subgraph Runtime[页面运行时]
         Shared[shared 通用模块\n节奏 / 任务会话 / 稳定性 / 分页]
-        Platform[platform 平台边界\n契约 / 注册中心 / Instagram 适配器]
-        Legacy[现有 Instagram 清理运行时\n扫描 / 筛选 / 菜单 / 删除 / 面板]
+        Platform[platform 平台边界\n契约 / 注册中心 / 平台适配器]
+        Legacy[通用清理运行时\n扫描 / 筛选 / 菜单 / 删除 / 面板]
         Shared --> Legacy
         Platform --> Legacy
     end
 
     Content --> Runtime
-    Legacy --> DOM[Instagram 可见 DOM]
+    Legacy --> DOM[平台可见 DOM]
     DOM --> Legacy
     Legacy -->|状态和统计| Content
     Content -->|消息响应| Worker
@@ -60,16 +60,19 @@ flowchart TD
 
 ### 当前插件化状态
 
-阶段 0 至阶段 5 已完成：
+阶段 0 至阶段 6 的代码接入已完成：
 
 - `src/platform/contract.js`：标准能力、错误类别和动作结果。
 - `src/platform/registry.js`：插件注册、查找和按目标 URL 解析。
 - `src/platform/instagram/identity.js`：Instagram `/p/` 和 `/reel/` 地址规范化。
 - `src/platform/instagram/plugin.js`：Instagram 插件注册和页面能力组装。
 - `src/platform/instagram/{surface,comments,loader,preflight,actions,errors}.js`：评论面、解析、展开/分页、前置检查、删除动作和异常分类。
+- `src/platform/tiktok/{identity,dom,surface,comments,loader,preflight,actions,errors,plugin}.js`：TikTok 作品页、评论面、解析、逐父评论展开、分页、前置检查、删除动作和异常分类。
 - `src/core/{cleaner-runtime,task-session,wait-coordinator,ui-model,runtime-transport}.js`：通用任务编排、可取消等待、会话、UI 快照和消息边界。
 
-当前页面入口为 `src/content/cleaner-panel.js`，只渲染面板和路由核心命令。候选规则由 `src/core/candidate-policy.js` 统一执行；Instagram 的 DOM 细节已迁移到 `src/platform/instagram/`。当前仍只支持 Instagram，尚未接入 TikTok、YouTube 或 Facebook。
+当前页面入口为 `src/content/cleaner-panel.js`，只渲染面板和路由核心命令。候选规则由 `src/core/candidate-policy.js` 统一执行；Instagram 与 TikTok 的 DOM 细节分别位于各自平台目录。当前未接入 YouTube 或 Facebook。
+
+TikTok 的实现和自动化 fixture 已覆盖 `https://www.tiktok.com/@<creator>/video/<id>` 作品页、评论页签、一级评论与回复、逐父评论展开、唯一菜单和删除验证、滚动/加载更多分页、计划刷新及检查点恢复。真实页面仍应先用 Preview，再用测试账号小批量验证；在完成真实验收前，不应把静态测试结果当作平台删除成功证明。
 
 ## 安装
 
@@ -97,11 +100,20 @@ npm run package
 
 点击工具栏中的扩展图标，在配置弹窗填写：
 
-- **目标帖子 URL**：Instagram 帖子或 Reels 的完整地址，例如 `https://www.instagram.com/p/shortcode/`。
+- **目标内容 URL**：根据所选平台填写完整地址。Instagram 示例：`https://www.instagram.com/p/shortcode/`；TikTok 示例：`https://www.tiktok.com/@creator/video/1234567890123456789`。
 - **白名单用户名**：每行一个用户名，可带 `@`，比较时不区分大小写。
 - **删除关键词**：每行一个普通文本关键词，回复文本包含任意关键词时进入候选。
 
-目标地址只接受 Instagram 的 `/p/` 或 `/reel/` 路径；查询参数、哈希和末尾斜杠会自动规范化。
+目标地址必须符合所选平台的完整页面格式；查询参数和哈希会自动清除，短链、个人主页和无法唯一匹配的地址会被拒绝。
+
+### 已接入范围与最小权限
+
+| 平台 | 代码与自动化覆盖的页面范围 | 目标地址限制 |
+| --- | --- | --- |
+| Instagram | 帖子与 Reels 的已加载评论和回复 | `https://www.instagram.com/p/<shortcode>/` 或 `/reel/<shortcode>/` |
+| TikTok | 作品页评论页签、回复展开、删除验证、分页和续跑恢复 | `https://www.tiktok.com/@<creator>/video/<id>` |
+
+扩展仅申请运行所需的权限：`storage` 用于保存设置和检查点，`tabs` 用于打开、定位和刷新目标页，`alarms` 用于本轮完成后的续跑；页面访问范围仅为 Instagram 的现有域名和 `https://www.tiktok.com/*`。TikTok 目前已完成代码和自动化接入，真实页面的 Preview、单条删除、分页、刷新恢复和 Pause/Stop 仍须由测试账号完成验收；在此之前请勿将其视作生产环境删除验证。
 
 ### 2. 先运行预览
 
@@ -143,7 +155,7 @@ npm run package
 | 连续处理后休息 | 平均 60 秒，最短 45 秒，最长 90 秒 | 避免长时间连续操作 |
 | 本次删除上限 | 100 条 | 也可以选择“不限”，但仍受限频和异常保护约束 |
 | 本轮完成后续跑 | 平均 30 分钟，范围 10～60 分钟 | 刷新页面并继续下一轮 |
-| 全局限频 | 每分钟 5 次，每小时 60 次 | 所有 Instagram 标签页共用 |
+| 全局限频 | 每分钟 5 次，每小时 60 次 | 所有目标平台标签页共用 |
 | 自动加载 | 始终开启 | 自动滚动或点击可见加载入口 |
 
 ## 安全边界
@@ -154,7 +166,7 @@ npm run package
 - 评论区、菜单、删除项或确认结果无法唯一确认时暂停。
 - 检测到验证、挑战、限流、权限不足或页面结构异常时暂停。
 - 同一目标帖子同时只能有一个运行会话。
-- 不要求用户提供 Instagram 密码，不上传账号信息，不调用私有接口。
+- 不要求用户提供平台密码，不上传账号信息，不调用平台私有接口。
 - 真实使用建议先用测试账号、小批量和预览模式验证。
 
 ## 项目结构
@@ -168,7 +180,8 @@ social-comment-cleaner/
 │   ├── platform/
 │   │   ├── contract.js                   # 平台插件契约
 │   │   ├── registry.js                   # 插件注册中心
-│   │   └── instagram/                    # Instagram 平台适配层（迁移中）
+│   │   ├── instagram/                    # Instagram 平台适配层
+│   │   └── tiktok/                       # TikTok 平台适配层
 │   ├── shared/                           # 节奏、会话、退避、限频和分页工具
 │   └── content/                          # 当前页面扫描、解析、删除和悬浮面板运行时
 │       └── floating-panel-state.js       # 面板状态、长按拖动和边缘吸附纯逻辑
@@ -189,12 +202,12 @@ git diff --check
 
 ## 后续路线
 
-1. 使用测试账号执行 Preview 和小批量 Instagram 真实页面验收，并记录页面、批量和结果。
-2. 根据 TikTok 的实际页面结构实现独立插件、精确权限与插件 fixture。
-3. 选择第二个平台进行插件试点，不复制通用运行时。
+1. 使用测试账号执行 Preview 和小批量 Instagram、TikTok 真实页面验收，并记录页面、批量和结果。
+2. 观察平台 DOM 变化，必要时只在对应插件目录内更新选择器和 fixture。
+3. 选择新的平台进行插件试点时，不复制通用运行时。
 
 详细边界和迁移顺序见：[社交评论清理器多平台插件化解耦合重构方案](doc/社交评论清理器多平台插件化解耦合重构方案.md)。
 
 ## 免责声明
 
-本工具只应处理用户本人有权管理的内容。Instagram 页面结构、账号权限和平台规则可能变化；遇到验证、限流或页面异常时，应停止操作并按平台提示处理。
+本工具只应处理用户本人有权管理的内容。Instagram 和 TikTok 页面结构、账号权限及平台规则可能变化；遇到验证、限流或页面异常时，应停止操作并按平台提示处理。
