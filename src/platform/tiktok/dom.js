@@ -10,6 +10,15 @@
     'comment', 'comments', '评论', '評論', 'コメント', '댓글',
     'comentarios', 'commentaires', 'kommentare', 'комментарии',
   ]);
+  const REPLY_EXPANSION_PATTERNS = [
+    /^(?:view|show)(?:\s+all)?(?:\s+more)?\s+\d+\s+repl(?:y|ies)$/i,
+    /^(?:view|show)\s+\d+\s+more\s+repl(?:y|ies)$/i,
+    /^(?:view|show)\s+(?:more\s+)?repl(?:y|ies)$/i,
+    /^\d+件(?:の)?返信を表示$/,
+    /^(?:返信を(?:さらに|もっと)|(?:さらに|もっと)返信を)表示$/,
+    /^(?:查看|展开|展開)(?:全部)?\s*\d+\s*(?:条|條)?(?:回复|回覆)$/,
+    /^(?:查看|顯示|显示)(?:更多|全部)?(?:回复|回覆)$/,
+  ];
   const CREATOR_LABELS = new Set([
     'creator', 'クリエイター', '创作者', '創作者', 'creador', 'creadora', 'créateur', 'créatrice',
   ]);
@@ -31,6 +40,18 @@
     return [...new Set(found)];
   }
   function hasVisibleBodies(root) { return findBodies(root).some(isVisible); }
+
+  function isReplyExpansionText(value) {
+    const text = normalizeText(value).toLocaleLowerCase();
+    return Boolean(text) && REPLY_EXPANSION_PATTERNS.some((pattern) => pattern.test(text));
+  }
+
+  function findReplyExpansionControls(root) {
+    const candidates = [...(root?.querySelectorAll?.('button,[role="button"],p,span,div') || [])]
+      .filter((element) => isVisible(element) && isReplyExpansionText(element.textContent));
+    // 只保留最深层带文案的节点，避免同一入口的父容器重复点击。
+    return candidates.filter((element) => ![...(element.children || [])].some((child) => isVisible(child) && isReplyExpansionText(child.textContent)));
+  }
 
   function locateBody(element) {
     if (element?.matches?.(LEVEL_1) || element?.matches?.(LEVEL_2)) return element;
@@ -103,6 +124,15 @@
     return null;
   }
 
+  function getThreadParentBody(element) {
+    for (let ancestor = element?.parentElement; ancestor; ancestor = ancestor.parentElement) {
+      const parents = [...(ancestor.querySelectorAll?.(LEVEL_1) || [])];
+      if (parents.length === 1) return parents[0];
+      if (parents.length > 1) return null;
+    }
+    return null;
+  }
+
   function commentTabState(input) {
     const documentLike = documentFor(input);
     const groups = [...(documentLike?.querySelectorAll?.(TAB_GROUP_SELECTOR) || [])]
@@ -133,6 +163,9 @@
     getAuthor,
     getText,
     getParentBody,
+    getThreadParentBody,
+    isReplyExpansionText,
+    findReplyExpansionControls,
     isCreator,
     commentTabState,
   });

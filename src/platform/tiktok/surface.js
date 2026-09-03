@@ -24,7 +24,7 @@
     const tab = dom.commentTabState(documentRef);
     if (tab.ok) {
       const candidates = ancestors(tab.group).filter((candidate) => candidate !== documentRef && candidate !== documentRef.body && bodies.every((body) => candidate.contains?.(body)));
-      if (candidates.length) return candidates[candidates.length - 1];
+      if (candidates.length) return candidates[0];
     }
     const firstAncestors = ancestors(bodies[0]);
     const common = firstAncestors.find((candidate) => bodies.every((body) => candidate.contains?.(body)));

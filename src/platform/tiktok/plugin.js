@@ -59,18 +59,10 @@
       waitUntilStable: method('SocialCommentTikTokSurface', 'waitUntilStable'),
     },
     loader: {
-      findExpansionControls: (...args) => global.SocialCommentTikTokSurface
-        ? contract.createActionResult(true, { controls: [] })
-        : method('SocialCommentTikTokLoader', 'findExpansionControls')(...args),
-      expand: (...args) => global.SocialCommentTikTokSurface
-        ? contract.createActionResult(true, { expanded: false, count: 0 })
-        : method('SocialCommentTikTokLoader', 'expand')(...args),
-      expandAll: (...args) => global.SocialCommentTikTokSurface
-        ? contract.createActionResult(true, { expanded: false, count: 0 })
-        : method('SocialCommentTikTokLoader', 'expandAll')(...args),
-      expandParent: (...args) => global.SocialCommentTikTokSurface
-        ? contract.createActionResult(true, { expanded: false, count: 0 })
-        : method('SocialCommentTikTokLoader', 'expandParent')(...args),
+      findExpansionControls: method('SocialCommentTikTokLoader', 'findExpansionControls'),
+      expand: method('SocialCommentTikTokLoader', 'expand'),
+      expandAll: method('SocialCommentTikTokLoader', 'expandAll'),
+      expandParent: method('SocialCommentTikTokLoader', 'expandParent'),
       findLoadMoreControls: method('SocialCommentTikTokLoader', 'findLoadMoreControls'),
       loadNextBatch: method('SocialCommentTikTokLoader', 'loadNextBatch'),
       createPagination: (...args) => global.SocialCommentTikTokSurface

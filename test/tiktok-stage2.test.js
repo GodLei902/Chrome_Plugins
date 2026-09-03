@@ -8,6 +8,7 @@ class Element {
   constructor(tag = 'div', attrs = {}, text = '') { this.tagName = tag.toUpperCase(); this.attrs = { ...attrs }; this.children = []; this.parentElement = null; this.ownerDocument = null; this.isConnected = true; this.text = text; this.clickCount = 0; this.style = {}; this.onClick = null; }
   append(...children) { children.forEach((child) => { child.parentElement = this; child.setOwnerDocument(this.ownerDocument); this.children.push(child); }); return this; }
   setOwnerDocument(documentLike) { this.ownerDocument = documentLike; this.children.forEach((child) => child.setOwnerDocument(documentLike)); }
+  remove() { const siblings = this.parentElement?.children || []; const index = siblings.indexOf(this); if (index >= 0) siblings.splice(index, 1); this.isConnected = false; this.parentElement = null; }
   get textContent() { return [this.text, ...this.children.map((child) => child.textContent)].filter(Boolean).join(' '); }
   get innerText() { return this.textContent; }
   getAttribute(name) { return this.attrs[name] ?? null; }
@@ -36,6 +37,7 @@ function context() {
     'src/platform/tiktok/dom.js',
     'src/platform/tiktok/surface.js',
     'src/platform/tiktok/comments.js',
+    'src/platform/tiktok/loader.js',
     'src/platform/tiktok/plugin.js',
   ]);
 }
@@ -85,16 +87,41 @@ test('TikTok 记录解析区分一级/回复、唯一父级和 Creator 区域保
   assert.equal(comments.toRecord(orphan, { contentId: '123' }).error.code, 'ambiguous');
 });
 
-test('TikTok 第二阶段 Preview 只允许页签点击，展开和删除保持安全占位', () => {
+test('TikTok 第二阶段 Preview 只允许页签点击，展开和删除保持安全占位', async () => {
   const c = context();
   const plugin = c.SocialCommentPlatformRegistry.get('tiktok');
   assert.equal(plugin.capabilities.supportsPreview, true);
   assert.equal(plugin.capabilities.supportsReplies, true);
   assert.equal(plugin.capabilities.supportsCommentDelete, false);
   assert.equal(plugin.loader.expandAll().ok, true);
-  assert.equal(plugin.loader.expandParent().ok, true);
-  assert.equal(plugin.loader.expandParent().expanded, false);
+  assert.equal(plugin.loader.expandAll().expanded, false);
+  assert.equal((await plugin.loader.expandParent()).error.code, 'not-ready');
   assert.equal(plugin.actions.confirmDelete().error.code, 'unsupported');
+});
+
+test('TikTok Preview 会逐一级评论点击唯一回复入口并确认新增回复', async () => {
+  const c = loadContext([
+    'src/shared/comment-types.js', 'src/shared/comment-surface-stability.js',
+    'src/platform/contract.js', 'src/platform/tiktok/identity.js', 'src/platform/tiktok/dom.js',
+    'src/platform/tiktok/loader.js',
+  ]);
+  const documentLike = new FixtureDocument();
+  const surface = node('div');
+  const parent = comment(1, 'visitor', '一级评论');
+  const threadRoot = thread(parent);
+  const control = node('p', {}, '1件の返信を表示');
+  control.onClick = () => { threadRoot.append(comment(2, 'guest', '回复内容')); control.remove(); };
+  threadRoot.append(control);
+  surface.append(threadRoot);
+  documentLike.append(surface);
+  const result = await c.SocialCommentTikTokLoader.expandParent(surface, parent, {}, {
+    wait: { until: async (predicate) => Boolean(await predicate()) },
+    coordinateAction: async (type, action) => ({ ok: true, value: action(type) }),
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.expanded, true);
+  assert.equal(surface.querySelectorAll('[data-e2e="comment-level-2"]').length, 1);
+  assert.equal(control.clickCount, 1);
 });
 
 test('TikTok Preview 仅扫描和统计，不调用菜单、确认或删除动作', async () => {
@@ -102,7 +129,7 @@ test('TikTok Preview 仅扫描和统计，不调用菜单、确认或删除动�
     'src/shared/comment-types.js', 'src/shared/comment-surface-stability.js', 'src/shared/task-session.js',
     'src/shared/action-pace-controller.js', 'src/platform/contract.js', 'src/platform/registry.js',
     'src/platform/tiktok/identity.js', 'src/platform/tiktok/preflight.js', 'src/platform/tiktok/errors.js',
-    'src/platform/tiktok/dom.js', 'src/platform/tiktok/surface.js', 'src/platform/tiktok/comments.js',
+    'src/platform/tiktok/dom.js', 'src/platform/tiktok/surface.js', 'src/platform/tiktok/comments.js', 'src/platform/tiktok/loader.js',
     'src/platform/tiktok/plugin.js', 'src/core/candidate-policy.js', 'src/core/task-session.js',
     'src/core/wait-coordinator.js', 'src/core/ui-model.js', 'src/core/cleaner-runtime.js',
   ]);
