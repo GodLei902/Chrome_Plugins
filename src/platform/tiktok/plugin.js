@@ -24,12 +24,12 @@
     targetPlaceholder: 'https://www.tiktok.com/@creator/video/1234567890123456789',
     matches: ['https://www.tiktok.com/*'],
     capabilities: {
-      supportsReplies: false,
+      supportsReplies: Boolean(global.SocialCommentTikTokComments),
       supportsNestedReplies: false,
       supportsAutoLoad: false,
       supportsCommentDelete: false,
       requiresAuthorConfirmation: true,
-      supportsPreview: false,
+      supportsPreview: Boolean(global.SocialCommentTikTokSurface && global.SocialCommentTikTokComments),
     },
     identity: {
       normalizeTargetUrl: identity.normalizeTargetUrl,
@@ -59,13 +59,23 @@
       waitUntilStable: method('SocialCommentTikTokSurface', 'waitUntilStable'),
     },
     loader: {
-      findExpansionControls: method('SocialCommentTikTokLoader', 'findExpansionControls'),
-      expand: method('SocialCommentTikTokLoader', 'expand'),
-      expandAll: method('SocialCommentTikTokLoader', 'expandAll'),
-      expandParent: method('SocialCommentTikTokLoader', 'expandParent'),
+      findExpansionControls: (...args) => global.SocialCommentTikTokSurface
+        ? contract.createActionResult(true, { controls: [] })
+        : method('SocialCommentTikTokLoader', 'findExpansionControls')(...args),
+      expand: (...args) => global.SocialCommentTikTokSurface
+        ? contract.createActionResult(true, { expanded: false, count: 0 })
+        : method('SocialCommentTikTokLoader', 'expand')(...args),
+      expandAll: (...args) => global.SocialCommentTikTokSurface
+        ? contract.createActionResult(true, { expanded: false, count: 0 })
+        : method('SocialCommentTikTokLoader', 'expandAll')(...args),
+      expandParent: (...args) => global.SocialCommentTikTokSurface
+        ? contract.createActionResult(true, { expanded: false, count: 0 })
+        : method('SocialCommentTikTokLoader', 'expandParent')(...args),
       findLoadMoreControls: method('SocialCommentTikTokLoader', 'findLoadMoreControls'),
       loadNextBatch: method('SocialCommentTikTokLoader', 'loadNextBatch'),
-      createPagination: method('SocialCommentTikTokLoader', 'createPagination'),
+      createPagination: (...args) => global.SocialCommentTikTokSurface
+        ? null
+        : method('SocialCommentTikTokLoader', 'createPagination')(...args),
       getProgress: method('SocialCommentTikTokLoader', 'getProgress'),
       hasReachedEnd: method('SocialCommentTikTokLoader', 'hasReachedEnd'),
       cancel: method('SocialCommentTikTokLoader', 'cancel'),
@@ -85,7 +95,9 @@
       nextParent: method('SocialCommentTikTokComments', 'nextParent'),
     },
     actions: {
-      resolveElement: method('SocialCommentTikTokActions', 'resolveElement'),
+      resolveElement: (...args) => global.SocialCommentTikTokComments
+        ? global.SocialCommentTikTokComments.resolveElement(...args)
+        : method('SocialCommentTikTokActions', 'resolveElement')(...args),
       ensureReplyVisible: method('SocialCommentTikTokActions', 'ensureReplyVisible'),
       revealMenu: method('SocialCommentTikTokActions', 'revealMenu'),
       getMenu: method('SocialCommentTikTokActions', 'getMenu'),
