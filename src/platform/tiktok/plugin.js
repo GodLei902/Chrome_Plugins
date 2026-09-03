@@ -26,7 +26,7 @@
     capabilities: {
       supportsReplies: Boolean(global.SocialCommentTikTokComments),
       supportsNestedReplies: false,
-      supportsAutoLoad: false,
+      supportsAutoLoad: Boolean(global.SocialCommentTikTokLoader),
       supportsCommentDelete: Boolean(global.SocialCommentTikTokActions),
       requiresAuthorConfirmation: true,
       supportsPreview: Boolean(global.SocialCommentTikTokSurface && global.SocialCommentTikTokComments),
@@ -65,9 +65,7 @@
       expandParent: method('SocialCommentTikTokLoader', 'expandParent'),
       findLoadMoreControls: method('SocialCommentTikTokLoader', 'findLoadMoreControls'),
       loadNextBatch: method('SocialCommentTikTokLoader', 'loadNextBatch'),
-      createPagination: (...args) => global.SocialCommentTikTokSurface
-        ? null
-        : method('SocialCommentTikTokLoader', 'createPagination')(...args),
+      createPagination: method('SocialCommentTikTokLoader', 'createPagination'),
       getProgress: method('SocialCommentTikTokLoader', 'getProgress'),
       hasReachedEnd: method('SocialCommentTikTokLoader', 'hasReachedEnd'),
       cancel: method('SocialCommentTikTokLoader', 'cancel'),

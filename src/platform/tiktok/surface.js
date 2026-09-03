@@ -38,6 +38,11 @@
   }
 
   function findScrollableSurface(surface) {
+    if (!surface) return null;
+    // TikTok 的评论滚动容器通常是评论面后代而非祖先；优先复用 DOM 适配器的
+    // 唯一候选判定，容器被虚拟列表替换后由 loader 再次调用重新发现。
+    const descendant = dom.findScrollableElement?.(surface);
+    if (descendant) return descendant;
     let current = surface;
     while (current && current !== current.ownerDocument?.body) {
       const style = current.ownerDocument?.defaultView?.getComputedStyle?.(current);

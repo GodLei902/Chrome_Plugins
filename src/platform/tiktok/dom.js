@@ -6,6 +6,7 @@
   const BODY_SELECTOR = `${LEVEL_1}, ${LEVEL_2}`;
   const TAB_GROUP_SELECTOR = 'div[data-testid="tux-web-tab-bar"]';
   const TAB_BUTTON_SELECTOR = 'button[data-testid="tux-web-tab-bar"]';
+  const LOAD_MORE_CANDIDATE_SELECTOR = 'button,[role="button"],span,p,div';
   const COMMENT_TAB_LABELS = new Set([
     'comment', 'comments', '评论', '評論', 'コメント', '댓글',
     'comentarios', 'commentaires', 'kommentare', 'комментарии',
@@ -19,6 +20,18 @@
     /^(?:返信を(?:さらに|もっと)|(?:さらに|もっと)返信を)表示$/,
     /^(?:查看|展开|展開)(?:全部)?\s*\d+\s*(?:条|條)?(?:回复|回覆)$/,
     /^(?:查看|顯示|显示)(?:更多|全部)?(?:回复|回覆)$/,
+  ];
+  // 加载入口文案只在评论面外的控制节点中识别，不能把评论正文中的“查看更多”当成分页动作。
+  const LOAD_MORE_PATTERNS = [
+    /^(?:view|show|see|load)\s+(?:more|all)(?:\s+\d+)?\s*(?:comments?|replies?)?$/i,
+    /^(?:view|show|see|load)(?:\s+all)?\s+(?:\d+\s+)?(?:more\s+)?(?:comments?|replies?)$/i,
+    /^\d+\s+(?:more\s+)?(?:comments?|replies?)$/i,
+    /^(?:查看|顯示|显示|加载|載入)(?:更多|全部)\s*(?:评论|評論|回复|回覆)?$/i,
+    /^(?:查看|顯示|显示|加载|載入)\s*(?:评论|評論|回复|回覆)$/i,
+    /^(?:もっと|さらに)(?:コメント|返信)?を(?:見る|表示)$/i,
+    /^(?:commentaires?|réponses?)\s+(?:suivants?|supplémentaires?)$/i,
+    /^(?:ver|mostrar)\s+(?:más|todos)?\s*(?:comentarios?|respuestas?)?$/i,
+    /^(?:mehr|weitere)\s+(?:kommentare|antworten)?\s*(?:anzeigen)?$/i,
   ];
   const CREATOR_LABELS = new Set([
     'creator', 'クリエイター', '创作者', '創作者', 'creador', 'creadora', 'créateur', 'créatrice',
@@ -47,11 +60,77 @@
     return Boolean(text) && REPLY_EXPANSION_PATTERNS.some((pattern) => pattern.test(text));
   }
 
+  function isLoadMoreText(value) {
+    const text = normalizeText(value);
+    if (!text || isReplyExpansionText(text)) return false;
+    return LOAD_MORE_PATTERNS.some((pattern) => pattern.test(text));
+  }
+
   function findReplyExpansionControls(root) {
     const candidates = [...(root?.querySelectorAll?.('button,[role="button"],p,span,div') || [])]
       .filter((element) => isVisible(element) && isReplyExpansionText(element.textContent));
     // 只保留最深层带文案的节点，避免同一入口的父容器重复点击。
     return candidates.filter((element) => ![...(element.children || [])].some((child) => isVisible(child) && isReplyExpansionText(child.textContent)));
+  }
+
+  function controlLabels(element) {
+    return [element?.textContent, element?.innerText, element?.getAttribute?.('aria-label'), element?.getAttribute?.('title')]
+      .map(normalizeText)
+      .filter(Boolean);
+  }
+
+  function isOutsideCommentBody(element, root) {
+    if (element?.matches?.(LEVEL_1) || element?.matches?.(LEVEL_2)) return false;
+    for (let current = element?.parentElement; current && current !== root; current = current.parentElement) {
+      if (current.matches?.(LEVEL_1) || current.matches?.(LEVEL_2)) return false;
+      // 回复展开容器与一级正文通常是兄弟节点；当某个控制节点位于仅含一个
+      // 一级评论且已有回复/展开证据的线程内时，视为线程动作而非页面分页。
+      const parentCount = current.querySelectorAll?.(LEVEL_1)?.length || 0;
+      const replyCount = current.querySelectorAll?.(LEVEL_2)?.length || 0;
+      if (parentCount === 1 && (replyCount > 0 || findReplyExpansionControls(current).length > 0)) return false;
+    }
+    return true;
+  }
+
+  function findLoadMoreControls(root) {
+    const candidates = [...(root?.querySelectorAll?.(LOAD_MORE_CANDIDATE_SELECTOR) || [])]
+      .filter((element) => isVisible(element) && isOutsideCommentBody(element, root) && controlLabels(element).some(isLoadMoreText));
+    // 只保留最深层的实际控件，避免同一按钮的外层容器造成重复匹配。
+    return candidates.filter((element) => ![...(element.children || [])]
+      .some((child) => isVisible(child) && controlLabels(child).some(isLoadMoreText)));
+  }
+
+  function scrollableOverflow(node) {
+    try {
+      const style = node?.ownerDocument?.defaultView?.getComputedStyle?.(node);
+      const computed = String(style?.overflowY || '').toLocaleLowerCase();
+      const inline = String(node?.style?.overflowY || '').toLocaleLowerCase();
+      // 测试/嵌入页面可能只提供 display/visibility 的计算样式；仅当计算值明确
+      // 为可滚动值时优先采用它，否则保留元素本身的 overflowY 证据。
+      return ['auto', 'scroll', 'overlay'].includes(computed) ? computed : (inline || computed);
+    } catch {
+      return String(node?.style?.overflowY || '').toLocaleLowerCase();
+    }
+  }
+
+  function isScrollable(node) {
+    if (!node || node === node.ownerDocument?.body || node === node.ownerDocument?.documentElement || !isVisible(node)) return false;
+    if (!['auto', 'scroll', 'overlay'].includes(scrollableOverflow(node))) return false;
+    return Number(node.scrollHeight || 0) > Number(node.clientHeight || 0) + 1;
+  }
+
+  function findScrollableElements(root) {
+    const nodes = [root, ...(root?.querySelectorAll?.('*') || [])];
+    return [...new Set(nodes.filter(isScrollable))];
+  }
+
+  function findScrollableElement(root) {
+    const candidates = findScrollableElements(root);
+    return candidates.sort((left, right) => {
+      const leftComments = findBodies(left).length;
+      const rightComments = findBodies(right).length;
+      return rightComments - leftComments || Number(right.scrollHeight || 0) - Number(left.scrollHeight || 0);
+    })[0] || null;
   }
 
   function locateBody(element) {
@@ -181,6 +260,11 @@
     getThreadContainer,
     isReplyExpansionText,
     findReplyExpansionControls,
+    isLoadMoreText,
+    findLoadMoreControls,
+    isScrollable,
+    findScrollableElements,
+    findScrollableElement,
     isCreator,
     commentTabState,
   });
