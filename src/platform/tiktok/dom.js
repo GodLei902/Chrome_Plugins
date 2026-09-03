@@ -134,6 +134,19 @@
     return null;
   }
 
+  // TikTok 的回复容器与一级评论正文是兄弟节点；展开确认必须覆盖完整线程。
+  function getThreadContainer(element) {
+    const body = locateBody(element);
+    for (let current = body?.parentElement || element?.parentElement; current; current = current.parentElement) {
+      const parents = [...(current.querySelectorAll?.(LEVEL_1) || [])];
+      if (parents.length !== 1 || (body && !current.contains?.(body))) continue;
+      const hasReplies = [...(current.querySelectorAll?.(LEVEL_2) || [])].length > 0;
+      const hasExpansion = findReplyExpansionControls(current).length > 0;
+      if (hasReplies || hasExpansion) return current;
+    }
+    return null;
+  }
+
   function commentTabState(input) {
     const documentLike = documentFor(input);
     const groups = [...(documentLike?.querySelectorAll?.(TAB_GROUP_SELECTOR) || [])]
@@ -165,6 +178,7 @@
     getText,
     getParentBody,
     getThreadParentBody,
+    getThreadContainer,
     isReplyExpansionText,
     findReplyExpansionControls,
     isCreator,

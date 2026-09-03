@@ -157,12 +157,45 @@ test('TikTok 日文“あと N 件表示”会作为同一父评论的后续展�
   assert.equal(first.complete, false);
   const second = await c.SocialCommentTikTokLoader.expandParent(surface, parent, {}, options);
   assert.equal(second.ok, true);
-  assert.equal(second.complete, false);
+  assert.equal(second.complete, true);
   const complete = await c.SocialCommentTikTokLoader.expandParent(surface, parent, {}, options);
   assert.equal(complete.ok, true);
   assert.equal(complete.complete, true);
   assert.equal(firstControl.clickCount, 1);
   assert.equal(surface.querySelectorAll('[data-e2e="comment-level-2"]').length, 2);
+});
+
+test('TikTok 展开确认覆盖一级评论的完整线程，不受正文与回复容器为兄弟节点影响', async () => {
+  const c = loadContext([
+    'src/shared/comment-types.js', 'src/shared/comment-surface-stability.js',
+    'src/platform/contract.js', 'src/platform/tiktok/identity.js', 'src/platform/tiktok/dom.js',
+    'src/platform/tiktok/comments.js', 'src/platform/tiktok/loader.js',
+  ]);
+  const documentLike = new FixtureDocument();
+  const surface = node('div');
+  const threadRoot = node('div');
+  const content = node('div');
+  const parentRow = comment(1, 'visitor', '一级评论');
+  content.append(parentRow);
+  const replies = node('div');
+  const control = node('span', {}, 'あと2件表示');
+  control.onClick = () => {
+    replies.append(comment(2, 'guest-1', '第一条新增回复'), comment(2, 'guest-2', '第二条新增回复'));
+    control.remove();
+    replies.append(node('span', {}, '非表示'));
+  };
+  replies.append(control, node('span', {}, '非表示'));
+  threadRoot.append(content, replies);
+  surface.append(threadRoot);
+  documentLike.append(surface);
+  const result = await c.SocialCommentTikTokLoader.expandParent(surface, parentRow, { contentId: '123' }, {
+    wait: { until: async (predicate) => Boolean(await predicate()) },
+    coordinateAction: async (type, action) => ({ ok: true, value: action(type) }),
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.complete, true);
+  assert.equal(control.clickCount, 1);
+  assert.equal(replies.querySelectorAll('[data-e2e="comment-level-2"]').length, 2);
 });
 
 test('TikTok 回复展开会在父评论重绘后按稳定键重新定位，并安全拒绝重复入口和取消', async () => {

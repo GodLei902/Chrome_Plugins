@@ -46,6 +46,24 @@
     return success({ controls });
   }
 
+  function replyKeys(container, target) {
+    const comments = global.SocialCommentTikTokComments;
+    if (!container) return new Set();
+    const keys = new Set();
+    for (const body of dom.findBodies(container).filter((item) => dom.isVisible(item) && item.matches?.(dom.LEVEL_2))) {
+      const record = comments?.toRecord?.(body, target);
+      // 页面模块完整加载时使用回复稳定键；测试或降级环境以节点身份保留同一语义。
+      if (record?.ok && record.record?.id) keys.add(String(record.record.id));
+      else keys.add(body);
+    }
+    return keys;
+  }
+
+  function hasTerminalLabel(container) {
+    return [...(container?.querySelectorAll?.('button,[role="button"],p,span,div') || [])]
+      .some((element) => dom.isVisible(element) && dom.normalizeText(element.textContent) === '非表示');
+  }
+
   async function expandParent(surface, parentElement, target, options = {}) {
     const signal = options.signal;
     if (signal?.aborted) return failure('cancelled', 'TikTok 回复展开已取消。');
@@ -57,30 +75,43 @@
     if (!found.ok) return found;
     if (!found.controls.length) return success({ expanded: false, count: 0, complete: true });
     const control = found.controls[0];
-    const scope = resolved.parent.parentElement || surface;
-    const beforeCount = dom.findBodies(scope).filter(dom.isVisible).length;
-    const beforeExpanded = control.getAttribute?.('aria-expanded');
+    const scope = dom.getThreadContainer(resolved.parent) || surface;
+    const beforeKeys = replyKeys(scope, target);
     const action = () => { control.click?.(); return true; };
     const coordinated = options.coordinateAction
       ? await options.coordinateAction('expand-replies', action)
       : { ok: true, value: action() };
     if (coordinated?.ok === false) return failure(coordinated.error?.code || 'cancelled', coordinated.error?.message || 'TikTok 回复展开已取消。');
-    const progressed = () => signal?.aborted !== true && (
-      dom.findBodies(scope).filter(dom.isVisible).length > beforeCount
-      || control.isConnected === false
-      || (beforeExpanded !== 'true' && control.getAttribute?.('aria-expanded') === 'true')
-    );
+    const currentThread = () => {
+      const relocated = options.parentId
+        ? resolveParent(surface, null, target, options)
+        : success({ parent: resolved.parent });
+      return relocated.ok ? (dom.getThreadContainer(relocated.parent) || surface) : scope;
+    };
+    const progressed = () => {
+      if (signal?.aborted) return false;
+      const afterKeys = replyKeys(currentThread(), target);
+      // 只有确认出现新的可解析回复，才认为本次点击成功；不能以 100ms 或控件消失代替。
+      return [...afterKeys].some((key) => !beforeKeys.has(key));
+    };
     const wait = options.wait;
     const confirmed = wait?.until
-      ? await wait.until(progressed, { signal, timeoutMs: 8000, intervalMs: 120, reason: '正在等待回复展开结果...' })
+      ? await wait.until(progressed, { signal, timeoutMs: Number(options.expandTimeoutMs) || 30000, intervalMs: 120, reason: '正在等待回复展开结果...' })
       : progressed();
     if (signal?.aborted) return failure('cancelled', 'TikTok 回复展开已取消。');
-    if (!confirmed) return failure('ambiguous', 'TikTok 回复展开后未检测到新增回复，已暂停。');
+    if (!confirmed) return failure('ambiguous', 'TikTok 回复展开后未检测到可确认的新回复，已暂停当前一级评论。');
     if (options.waitUntilStable) {
       const stable = await options.waitUntilStable({ timeoutMs: 10000, reason: '正在等待展开后的评论区稳定...' });
       if (stable?.ok === false) return stable;
     }
-    return success({ expanded: true, count: 1, complete: false });
+    // 仍存在“あと N 件表示”时由核心继续处理同一父评论；“非表示”仅作为终态证据。
+    const finalThread = currentThread();
+    const finalResolved = options.parentId ? resolveParent(surface, null, target, options) : resolved;
+    if (!finalResolved.ok) return finalResolved;
+    const finalParent = finalResolved.parent;
+    const remaining = findExpansionControls(finalThread, { parentElement: finalParent });
+    if (!remaining.ok) return remaining;
+    return success({ expanded: true, count: 1, complete: !remaining.controls.length && hasTerminalLabel(finalThread) });
   }
 
   function expandAll(surface, target, options = {}) {
