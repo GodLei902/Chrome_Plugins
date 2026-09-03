@@ -99,7 +99,7 @@ test('TikTok 第二阶段 Preview 只允许页签点击，展开和删除保持�
   assert.equal(plugin.actions.confirmDelete().error.code, 'unsupported');
 });
 
-test('TikTok Preview 会逐一级评论点击唯一回复入口并确认新增回复', async () => {
+test('TikTok 回复展开只点击当前一级评论唯一入口，并确认新增回复', async () => {
   const c = loadContext([
     'src/shared/comment-types.js', 'src/shared/comment-surface-stability.js',
     'src/platform/contract.js', 'src/platform/tiktok/identity.js', 'src/platform/tiktok/dom.js',
@@ -122,6 +122,69 @@ test('TikTok Preview 会逐一级评论点击唯一回复入口并确认新增�
   assert.equal(result.expanded, true);
   assert.equal(surface.querySelectorAll('[data-e2e="comment-level-2"]').length, 1);
   assert.equal(control.clickCount, 1);
+});
+
+test('TikTok 回复展开会在父评论重绘后按稳定键重新定位，并安全拒绝重复入口和取消', async () => {
+  const c = loadContext([
+    'src/shared/comment-types.js', 'src/shared/comment-surface-stability.js', 'src/platform/contract.js',
+    'src/platform/tiktok/identity.js', 'src/platform/tiktok/dom.js', 'src/platform/tiktok/comments.js', 'src/platform/tiktok/loader.js',
+  ]);
+  const documentLike = new FixtureDocument();
+  const surface = node('div');
+  const original = comment(1, 'visitor', '一级评论');
+  const originalThread = thread(original);
+  surface.append(originalThread);
+  documentLike.append(surface);
+  const target = { contentId: '123' };
+  const parentId = c.SocialCommentTikTokComments.toRecord(original, target).record.id;
+  originalThread.remove();
+  const replacement = comment(1, 'visitor', '一级评论');
+  const replacementThread = thread(replacement);
+  const control = node('p', {}, '1件の返信を表示');
+  control.onClick = () => { replacementThread.append(comment(2, 'guest', '回复内容')); control.remove(); };
+  replacementThread.append(control);
+  surface.append(replacementThread);
+  const result = await c.SocialCommentTikTokLoader.expandParent(surface, original, target, {
+    parentId,
+    wait: { until: async (predicate) => Boolean(await predicate()) },
+    coordinateAction: async (type, action) => ({ ok: true, value: action(type) }),
+  });
+  assert.equal(result.ok, true);
+  assert.equal(control.clickCount, 1);
+
+  const duplicateParent = comment(1, 'other', '另一条评论');
+  const duplicateThread = thread(duplicateParent);
+  duplicateThread.append(node('p', {}, '查看 1 条回复'), node('p', {}, '查看 2 条回复'));
+  surface.append(duplicateThread);
+  const duplicate = await c.SocialCommentTikTokLoader.expandParent(surface, duplicateParent, target, {});
+  assert.equal(duplicate.error.code, 'ambiguous');
+
+  const cancelled = await c.SocialCommentTikTokLoader.expandParent(surface, replacement, target, {
+    parentId,
+    signal: AbortSignal.abort(),
+  });
+  assert.equal(cancelled.error.code, 'cancelled');
+});
+
+test('TikTok 回复展开未确认新增结果时暂停，不会跳过当前一级评论', async () => {
+  const c = loadContext([
+    'src/shared/comment-types.js', 'src/shared/comment-surface-stability.js', 'src/platform/contract.js',
+    'src/platform/tiktok/identity.js', 'src/platform/tiktok/dom.js', 'src/platform/tiktok/loader.js',
+  ]);
+  const documentLike = new FixtureDocument();
+  const surface = node('div');
+  const parent = comment(1, 'visitor', '一级评论');
+  const item = thread(parent);
+  const control = node('p', {}, '查看 1 条回复');
+  item.append(control);
+  surface.append(item);
+  documentLike.append(surface);
+  const result = await c.SocialCommentTikTokLoader.expandParent(surface, parent, {}, {
+    wait: { until: async () => false },
+    coordinateAction: async (type, action) => ({ ok: true, value: action(type) }),
+  });
+  assert.equal(control.clickCount, 1);
+  assert.equal(result.error.code, 'ambiguous');
 });
 
 test('TikTok Preview 仅扫描和统计，不调用菜单、确认或删除动作', async () => {
@@ -155,5 +218,47 @@ test('TikTok Preview 仅扫描和统计，不调用菜单、确认或删除动�
   assert.equal((await runtime.run()).ok, true);
   assert.equal(runtime.snapshot().stats.matched, 1);
   assert.equal(runtime.snapshot().stats.deleted, 0);
+  assert.deepEqual(calls, []);
+});
+
+test('TikTok Preview 按一级评论逐个展开、扫描和筛选，且从不调用删除动作', async () => {
+  const c = loadContext([
+    'src/shared/comment-types.js', 'src/shared/comment-surface-stability.js', 'src/shared/task-session.js',
+    'src/shared/action-pace-controller.js', 'src/platform/contract.js', 'src/platform/registry.js',
+    'src/platform/tiktok/identity.js', 'src/platform/tiktok/preflight.js', 'src/platform/tiktok/errors.js',
+    'src/platform/tiktok/dom.js', 'src/platform/tiktok/surface.js', 'src/platform/tiktok/comments.js', 'src/platform/tiktok/loader.js',
+    'src/platform/tiktok/plugin.js', 'src/core/candidate-policy.js', 'src/core/task-session.js',
+    'src/core/wait-coordinator.js', 'src/core/ui-model.js', 'src/core/cleaner-runtime.js',
+  ]);
+  const documentLike = new FixtureDocument();
+  documentLike.body = { innerText: '' };
+  const tabs = commentTabs('comments');
+  const surface = node('div');
+  const expansionOrder = [];
+  ['first', 'second'].forEach((name) => {
+    const parent = comment(1, name, `${name} 一级评论`);
+    const item = thread(parent);
+    const control = node('p', {}, '1件の返信を表示');
+    control.onClick = () => { expansionOrder.push(name); item.append(comment(2, `${name}-reply`, 'spam 回复')); control.remove(); };
+    item.append(control);
+    surface.append(item);
+  });
+  documentLike.append(tabs.group, surface);
+  const plugin = c.SocialCommentPlatformRegistry.get('tiktok');
+  const calls = [];
+  ['revealMenu', 'getMenu', 'findDeleteAction', 'confirmDelete', 'verifyDeleted'].forEach((name) => {
+    const original = plugin.actions[name];
+    plugin.actions[name] = (...args) => { calls.push(name); return original(...args); };
+  });
+  const runtime = c.SocialCommentCleanerRuntime.create({
+    platform: plugin,
+    settings: { deleteKeywords: 'spam', pace: { rateLimit: { perMinute: 5, perHour: 60 } } },
+    transport: { send: async () => ({ ok: true }) },
+    clock: { now: () => Date.now(), setInterval: () => null, clearInterval: () => {} },
+  });
+  assert.equal((await runtime.start({ mode: 'preview', targetUrl: documentLike.location.href, page: documentLike })).ok, true);
+  assert.equal((await runtime.run()).ok, true);
+  assert.deepEqual(expansionOrder, ['first', 'second']);
+  assert.equal(runtime.snapshot().stats.matched, 2);
   assert.deepEqual(calls, []);
 });

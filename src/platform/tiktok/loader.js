@@ -8,6 +8,28 @@
   const success = (details = {}) => contract.createActionResult(true, details);
   const failure = (code, message) => contract.createActionResult(false, { code, message });
 
+  function resolveParent(surface, parentElement, target, context = {}) {
+    const expectedId = String(context.parentId || '');
+    const comments = global.SocialCommentTikTokComments;
+    if (!surface?.isConnected) return failure('not-ready', 'TikTok 评论面已失效，需要重新发现。');
+    if (!expectedId) {
+      const body = dom.locateBody(parentElement);
+      return body && body.matches?.(dom.LEVEL_1) && surface.contains?.(body)
+        ? success({ parent: body })
+        : failure('ambiguous', 'TikTok 当前一级评论无法唯一定位，已暂停。');
+    }
+    if (typeof comments?.toRecord !== 'function') return failure('unsupported', 'TikTok 评论解析模块未加载。');
+    const matches = dom.findBodies(surface)
+      .filter((body) => dom.isVisible(body) && body.matches?.(dom.LEVEL_1))
+      .filter((body) => {
+        const record = comments.toRecord(body, target);
+        return record.ok && String(record.record?.id || '') === expectedId;
+      });
+    return matches.length === 1
+      ? success({ parent: matches[0] })
+      : failure('ambiguous', 'TikTok 当前一级评论已重绘且无法唯一重新定位，已暂停。');
+  }
+
   function findExpansionControls(surface, context = {}) {
     if (!surface?.isConnected) return failure('not-ready', 'TikTok 评论面已失效，需要重新发现。');
     const controls = dom.findReplyExpansionControls(surface).filter((control) => {
@@ -27,12 +49,15 @@
   async function expandParent(surface, parentElement, target, options = {}) {
     const signal = options.signal;
     if (signal?.aborted) return failure('cancelled', 'TikTok 回复展开已取消。');
-    const context = { parentElement };
+    // 每次动作前以稳定键重新定位父评论，避免虚拟列表或重绘后点击旧节点。
+    const resolved = resolveParent(surface, parentElement, target, options);
+    if (!resolved.ok) return resolved;
+    const context = { parentElement: resolved.parent };
     const found = findExpansionControls(surface, context);
     if (!found.ok) return found;
     if (!found.controls.length) return success({ expanded: false, count: 0, complete: true });
     const control = found.controls[0];
-    const scope = parentElement?.parentElement || surface;
+    const scope = resolved.parent.parentElement || surface;
     const beforeCount = dom.findBodies(scope).filter(dom.isVisible).length;
     const beforeExpanded = control.getAttribute?.('aria-expanded');
     const action = () => { control.click?.(); return true; };

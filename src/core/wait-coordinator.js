@@ -19,18 +19,21 @@
       this.onWaiting(reason);
       return new Promise((resolve) => {
         let settled = false;
+        let abortHandler = null;
         const pending = {
           finish: (value) => {
             if (settled) return;
             settled = true;
             clearTimeout(timer);
+            this.signal?.removeEventListener?.('abort', abortHandler);
             this.pending.delete(pending);
             resolve(Boolean(value));
           },
         };
         const timer = setTimeout(() => pending.finish(!this.isCancelled()), Math.max(0, Number(ms) || 0));
         this.pending.add(pending);
-        this.signal?.addEventListener?.('abort', () => pending.finish(false), { once: true });
+        abortHandler = () => pending.finish(false);
+        this.signal?.addEventListener?.('abort', abortHandler, { once: true });
       });
     }
 
@@ -41,11 +44,13 @@
         const startedAt = Date.now();
         let timer = null;
         let settled = false;
+        let abortHandler = null;
         const pending = {
           finish: (value) => {
             if (settled) return;
             settled = true;
             clearTimeout(timer);
+            this.signal?.removeEventListener?.('abort', abortHandler);
             this.pending.delete(pending);
             resolve(Boolean(value));
           },
@@ -58,7 +63,8 @@
           timer = setTimeout(check, Math.max(1, Number(intervalMs) || 120));
         };
         this.pending.add(pending);
-        this.signal?.addEventListener?.('abort', () => pending.finish(false), { once: true });
+        abortHandler = () => pending.finish(false);
+        this.signal?.addEventListener?.('abort', abortHandler, { once: true });
         check();
       });
     }
@@ -79,12 +85,14 @@
         let completed = 0;
         let frameId = null;
         let timeoutId = null;
+        let abortHandler = null;
         const pending = {
           finish: (value) => {
             if (settled) return;
             settled = true;
             if (frameId !== null) cancelFrame(frameId);
             clearTimeout(timeoutId);
+            this.signal?.removeEventListener?.('abort', abortHandler);
             this.pending.delete(pending);
             resolve(Boolean(value));
           },
@@ -97,7 +105,8 @@
         };
         timeoutId = setTimeout(() => pending.finish(!this.isCancelled()), Math.max(120, required * 120));
         this.pending.add(pending);
-        this.signal?.addEventListener?.('abort', () => pending.finish(false), { once: true });
+        abortHandler = () => pending.finish(false);
+        this.signal?.addEventListener?.('abort', abortHandler, { once: true });
         frameId = requestFrame(next);
       });
     }

@@ -123,6 +123,22 @@ test('WaitCoordinator 通过页面对象调用 requestAnimationFrame', async () 
   assert.ok(context.frameReceiver);
 });
 
+test('WaitCoordinator 在等待结束后释放 AbortSignal 监听器', async () => {
+  const c = loadCore();
+  const controller = new AbortController();
+  let added = 0;
+  let removed = 0;
+  const add = controller.signal.addEventListener.bind(controller.signal);
+  const remove = controller.signal.removeEventListener.bind(controller.signal);
+  controller.signal.addEventListener = (...args) => { added += 1; return add(...args); };
+  controller.signal.removeEventListener = (...args) => { removed += 1; return remove(...args); };
+  const wait = c.SocialCommentWaitCoordinator.create({ signal: controller.signal });
+  assert.equal(await wait.delay(0), true);
+  assert.equal(await wait.until(() => true, { timeoutMs: 10 }), true);
+  assert.equal(added, 2);
+  assert.equal(removed, 2);
+});
+
 test('CleanerRuntime 默认时钟通过页面对象续租和清理锁', () => {
   const context = loadCore();
   vm.runInContext(`
