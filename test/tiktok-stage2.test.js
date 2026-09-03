@@ -124,6 +124,47 @@ test('TikTok 回复展开只点击当前一级评论唯一入口，并确认新�
   assert.equal(control.clickCount, 1);
 });
 
+test('TikTok 日文“あと N 件表示”会作为同一父评论的后续展开入口，非表示则表示完成', async () => {
+  const c = loadContext([
+    'src/shared/comment-types.js', 'src/shared/comment-surface-stability.js',
+    'src/platform/contract.js', 'src/platform/tiktok/identity.js', 'src/platform/tiktok/dom.js', 'src/platform/tiktok/loader.js',
+  ]);
+  const documentLike = new FixtureDocument();
+  const surface = node('div');
+  const parent = comment(1, 'visitor', '一级评论');
+  const threadRoot = thread(parent);
+  const firstControl = node('p', {}, '— あと106件表示');
+  firstControl.onClick = () => {
+    threadRoot.append(comment(2, 'guest-1', '第一批回复'));
+    firstControl.remove();
+    const nextControl = node('p', {}, 'あと98件表示');
+    nextControl.onClick = () => {
+      threadRoot.append(comment(2, 'guest-2', '第二批回复'));
+      nextControl.remove();
+      threadRoot.append(node('p', {}, '非表示'));
+    };
+    threadRoot.append(nextControl);
+  };
+  threadRoot.append(firstControl);
+  surface.append(threadRoot);
+  documentLike.append(surface);
+  const options = {
+    wait: { until: async (predicate) => Boolean(await predicate()) },
+    coordinateAction: async (type, action) => ({ ok: true, value: action(type) }),
+  };
+  const first = await c.SocialCommentTikTokLoader.expandParent(surface, parent, {}, options);
+  assert.equal(first.ok, true);
+  assert.equal(first.complete, false);
+  const second = await c.SocialCommentTikTokLoader.expandParent(surface, parent, {}, options);
+  assert.equal(second.ok, true);
+  assert.equal(second.complete, false);
+  const complete = await c.SocialCommentTikTokLoader.expandParent(surface, parent, {}, options);
+  assert.equal(complete.ok, true);
+  assert.equal(complete.complete, true);
+  assert.equal(firstControl.clickCount, 1);
+  assert.equal(surface.querySelectorAll('[data-e2e="comment-level-2"]').length, 2);
+});
+
 test('TikTok 回复展开会在父评论重绘后按稳定键重新定位，并安全拒绝重复入口和取消', async () => {
   const c = loadContext([
     'src/shared/comment-types.js', 'src/shared/comment-surface-stability.js', 'src/platform/contract.js',
@@ -239,7 +280,21 @@ test('TikTok Preview 按一级评论逐个展开、扫描和筛选，且从不�
     const parent = comment(1, name, `${name} 一级评论`);
     const item = thread(parent);
     const control = node('p', {}, '1件の返信を表示');
-    control.onClick = () => { expansionOrder.push(name); item.append(comment(2, `${name}-reply`, 'spam 回复')); control.remove(); };
+    control.onClick = () => {
+      expansionOrder.push(`${name}-1`);
+      item.append(comment(2, `${name}-reply-1`, 'spam 回复'));
+      control.remove();
+      if (name === 'first') {
+        const followup = node('p', {}, 'あと106件表示');
+        followup.onClick = () => {
+          expansionOrder.push(`${name}-2`);
+          item.append(comment(2, `${name}-reply-2`, 'spam 回复'));
+          followup.remove();
+          item.append(node('p', {}, '非表示'));
+        };
+        item.append(followup);
+      }
+    };
     item.append(control);
     surface.append(item);
   });
@@ -258,7 +313,7 @@ test('TikTok Preview 按一级评论逐个展开、扫描和筛选，且从不�
   });
   assert.equal((await runtime.start({ mode: 'preview', targetUrl: documentLike.location.href, page: documentLike })).ok, true);
   assert.equal((await runtime.run()).ok, true);
-  assert.deepEqual(expansionOrder, ['first', 'second']);
-  assert.equal(runtime.snapshot().stats.matched, 2);
+  assert.deepEqual(expansionOrder, ['first-1', 'first-2', 'second-1']);
+  assert.equal(runtime.snapshot().stats.matched, 3);
   assert.deepEqual(calls, []);
 });

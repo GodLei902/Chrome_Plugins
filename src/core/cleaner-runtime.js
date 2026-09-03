@@ -415,32 +415,41 @@
           }
           if (parent) {
             const parentId = String(parent.id);
-            this.setState('expanding');
-            const resolved = await this.invoke(this.platform.actions.resolveElement, parent, this.actionContext({ surface, record: parent }));
-            const parentElement = resultValue(resolved, 'element');
-            await this.invoke(this.platform.loader.expandParent, surface, parentElement, this.target, this.actionContext({ surface, parentId }));
-            const scanned = await this.scanParent(parentId);
-            surface = scanned.surface || surface;
-            while (this.session.mode !== 'preview' && this.session.candidates.length && this.isActive()) {
-              const candidate = this.session.candidates.shift();
-              if (!candidate || this.session.processedIds.has(String(candidate.id))) continue;
-              const deleted = await this.executeCandidate(candidate);
-              if (!deleted.ok) return deleted;
-              const saved = await this.saveCheckpoint('running');
-              if (!saved.ok) throw new Error(saved.reason);
-              const paceState = this.pace?.success?.();
-              // 删除会重绘评论面；沿用旧流程，按父级 ID 重新定位后再继续展开。
-              const refreshedParent = await this.invoke(this.platform.actions.resolveElement, parent, this.actionContext({ surface, record: parent }));
-              await this.invoke(this.platform.loader.expandParent, surface, resultValue(refreshedParent, 'element'), this.target, this.actionContext({ surface, parentId }));
-              const refreshed = await this.scanParent(parentId);
-              surface = refreshed.surface || surface;
-              if (paceState === 'REST') {
-                this.setState('cooling-down');
-                if (!(await this.wait?.delay?.(this.delayGenerator(this.settings.pace?.rest), '连续处理达到上限，正在休息...'))) return { ok: false, cancelled: true };
-                this.pace.restComplete?.();
+            let parentComplete = false;
+            // 一个一级评论可能分多批加载回复；只有插件明确报告 complete 才切换到下一个父评论。
+            while (this.isActive() && !parentComplete) {
+              this.setState('expanding');
+              const resolved = await this.invoke(this.platform.actions.resolveElement, parent, this.actionContext({ surface, record: parent, parentId }));
+              const parentElement = resultValue(resolved, 'element');
+              const expanded = await this.invoke(this.platform.loader.expandParent, surface, parentElement, this.target, this.actionContext({ surface, parentId }));
+              // 未声明 complete 的既有插件一次处理完整父线程；仅显式 false 才继续当前线程。
+              parentComplete = expanded.complete !== false;
+              const scanned = await this.scanParent(parentId);
+              surface = scanned.surface || surface;
+              parent = scanned.parent || parent;
+              while (this.session.mode !== 'preview' && this.session.candidates.length && this.isActive()) {
+                const candidate = this.session.candidates.shift();
+                if (!candidate || this.session.processedIds.has(String(candidate.id))) continue;
+                const deleted = await this.executeCandidate(candidate);
+                if (!deleted.ok) return deleted;
+                const saved = await this.saveCheckpoint('running');
+                if (!saved.ok) throw new Error(saved.reason);
+                const paceState = this.pace?.success?.();
+                // 删除会重绘评论面；沿用旧流程，按父级 ID 重新定位后再继续展开。
+                const refreshedParent = await this.invoke(this.platform.actions.resolveElement, parent, this.actionContext({ surface, record: parent, parentId }));
+                const refreshedExpansion = await this.invoke(this.platform.loader.expandParent, surface, resultValue(refreshedParent, 'element'), this.target, this.actionContext({ surface, parentId }));
+                parentComplete = refreshedExpansion.complete !== false;
+                const refreshed = await this.scanParent(parentId);
+                surface = refreshed.surface || surface;
+                parent = refreshed.parent || parent;
+                if (paceState === 'REST') {
+                  this.setState('cooling-down');
+                  if (!(await this.wait?.delay?.(this.delayGenerator(this.settings.pace?.rest), '连续处理达到上限，正在休息...'))) return { ok: false, cancelled: true };
+                  this.pace.restComplete?.();
+                }
               }
             }
-            this.completedParentIds.add(parentId);
+            if (parentComplete) this.completedParentIds.add(parentId);
             continue;
           }
           if (!this.pagination) return this.finishCurrentRound('当前稳定评论容器中没有待处理回复。');
