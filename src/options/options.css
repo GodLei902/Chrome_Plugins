@@ -60,6 +60,7 @@ body {
   gap: 8px;
 }
 
+.field > label,
 .field span {
   font-weight: 600;
 }
@@ -76,6 +77,7 @@ body {
 }
 
 .field input:invalid:not(:placeholder-shown),
+.field select:user-invalid,
 .field input[aria-invalid="true"] {
   border-color: #dc2626;
   outline: 2px solid #fecaca;

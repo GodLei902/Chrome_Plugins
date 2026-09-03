@@ -213,3 +213,44 @@ test('TikTok 内容脚本链不加载 Instagram 页面模块，Preview 与 Start
     assert.equal(sent.includes('SC_RATE_ACQUIRE'), false);
   }
 });
+
+test('设置页平台选择由注册中心生成，并按显式选择更新目标字段元数据', () => {
+  const options = [];
+  const select = {
+    value: '',
+    replaceChildren() { options.splice(0); },
+    append(option) { options.push(option); },
+  };
+  const documentLike = { createElement() { return { value: '', textContent: '' }; } };
+  const context = createContext({ document: documentLike });
+  load(context, [
+    'src/platform/contract.js',
+    'src/platform/registry.js',
+    'src/platform/instagram/identity.js',
+    'src/platform/instagram/plugin.js',
+    'src/platform/tiktok/identity.js',
+    'src/platform/tiktok/plugin.js',
+    'src/core/platform-settings.js',
+    'src/options/platform-form.js',
+  ]);
+
+  context.SocialCommentPlatformForm.renderPlatformOptions(select, 'tiktok');
+  assert.deepEqual(options.map((option) => ({ value: option.value, textContent: option.textContent })), [
+    { value: 'instagram', textContent: 'Instagram' },
+    { value: 'tiktok', textContent: 'TikTok' },
+  ]);
+  assert.equal(select.value, 'tiktok');
+  assert.equal(context.SocialCommentPlatformForm.applyMetadata(null, { platformId: 'tiktok' }).placeholder, 'https://www.tiktok.com/@creator/video/1234567890123456789');
+
+  const oldInstagramUrl = 'https://www.instagram.com/p/example/';
+  const selectedTikTok = context.SocialCommentPlatformSettings.normalize(
+    { platformId: 'tiktok', targetUrl: oldInstagramUrl },
+    { preferPlatformId: true },
+  );
+  assert.equal(selectedTikTok.platformId, 'tiktok');
+  assert.equal(selectedTikTok.targetUrl, oldInstagramUrl);
+  assert.throws(
+    () => context.SocialCommentPlatformSettings.validateTarget(selectedTikTok, { required: true, preferPlatformId: true }),
+    /请输入 TikTok 目标页面的完整 URL/,
+  );
+});

@@ -1,16 +1,18 @@
 (function (global) {
   'use strict';
 
-  function resolvePlatform(settings = {}, registry = global.SocialCommentPlatformRegistry) {
+  function resolvePlatform(settings = {}, registry = global.SocialCommentPlatformRegistry, { preferPlatformId = false } = {}) {
     const platformId = String(settings.platformId || settings.platform || '');
     const targetUrl = settings.targetUrl || settings.targetPostUrl || '';
-    // 目标地址能唯一匹配插件时优先使用它，防止用户切换到新平台地址后
-    // 仍被旧设置中的 platformId 锁定；无匹配时保持原平台和默认回退顺序。
-    return registry?.resolve?.(targetUrl) || registry?.get?.(platformId) || registry?.all?.()[0] || null;
+    const configured = registry?.get?.(platformId) || null;
+    const matched = registry?.resolve?.(targetUrl) || null;
+    // 首次读取旧设置时由 URL 推断平台；用户通过设置页主动选择后，
+    // 必须以选择项为准，再由该平台校验 URL，不能被旧地址静默切换。
+    return preferPlatformId ? configured || matched || registry?.all?.()[0] || null : matched || configured || registry?.all?.()[0] || null;
   }
 
-  function normalize(raw = {}, registry = global.SocialCommentPlatformRegistry) {
-    const platform = resolvePlatform(raw, registry);
+  function normalize(raw = {}, { registry = global.SocialCommentPlatformRegistry, preferPlatformId = false } = {}) {
+    const platform = resolvePlatform(raw, registry, { preferPlatformId });
     const platformId = String(platform?.id || raw.platformId || raw.platform || '');
     const sourceTarget = String(raw.targetUrl || raw.targetPostUrl || '').trim();
     const canonicalTargetUrl = platform?.identity?.normalizeTargetUrl?.(sourceTarget) || sourceTarget;
@@ -24,9 +26,9 @@
     };
   }
 
-  function validateTarget(raw = {}, { required = false, registry } = {}) {
-    const settings = normalize(raw, registry);
-    const platform = resolvePlatform(settings, registry);
+  function validateTarget(raw = {}, { required = false, registry, preferPlatformId = false } = {}) {
+    const settings = normalize(raw, { registry, preferPlatformId });
+    const platform = resolvePlatform(settings, registry, { preferPlatformId });
     const targetUrl = platform?.identity?.normalizeTargetUrl?.(settings.targetUrl) || '';
     if (required && !targetUrl) throw new Error(`请输入 ${platform?.displayName || '当前平台'} 目标页面的完整 URL。`);
     return { ...settings, targetUrl: targetUrl || settings.targetUrl, targetPostUrl: targetUrl || settings.targetPostUrl };
@@ -42,5 +44,12 @@
     });
   }
 
-  global.SocialCommentPlatformSettings = Object.freeze({ resolvePlatform, normalize, validateTarget, getFormMetadata });
+  function getFormOptions(registry = global.SocialCommentPlatformRegistry) {
+    return Object.freeze((registry?.all?.() || []).map((platform) => Object.freeze({
+      id: platform.id,
+      displayName: platform.displayName,
+    })));
+  }
+
+  global.SocialCommentPlatformSettings = Object.freeze({ resolvePlatform, normalize, validateTarget, getFormMetadata, getFormOptions });
 })(globalThis);
